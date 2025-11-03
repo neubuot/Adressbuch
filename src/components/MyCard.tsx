@@ -14,7 +14,10 @@ interface MyCardProps {
 
 export const MyCard: React.FC<MyCardProps> = ({ onBack }) => {
   const { appState } = useAppContext();
-  const [formData, setFormData] = useState<AddressCard>(appState.myCard);
+  // Automerge-Proxy zu reinem JS-Objekt konvertieren
+  const [formData, setFormData] = useState<AddressCard>(
+    JSON.parse(JSON.stringify(appState.myCard))
+  );
   const [isSaving, setIsSaving] = useState(false);
 
   const handleChange = (field: keyof AddressCard, value: string) => {

@@ -112,10 +112,16 @@ export class AutomergeStore {
    */
   async updateMyCard(updates: Partial<AddressCard>): Promise<void> {
     await this.change('Update MyCard', (doc) => {
-      // Automerge benötigt einzelne Zuweisungen statt Object.assign
+      // Automerge benötigt einzelne Zuweisungen mit primitiven Werten
       for (const key in updates) {
         if (Object.prototype.hasOwnProperty.call(updates, key)) {
-          (doc.myCard as any)[key] = (updates as any)[key];
+          const value = (updates as any)[key];
+          // Konvertiere zu primitiven Werten (keine Automerge-Proxies)
+          if (typeof value === 'object' && value !== null) {
+            (doc.myCard as any)[key] = JSON.parse(JSON.stringify(value));
+          } else {
+            (doc.myCard as any)[key] = value;
+          }
         }
       }
       doc.myCard.updatedAt = new Date().toISOString();
