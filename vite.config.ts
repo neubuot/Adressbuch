@@ -28,6 +28,8 @@ export default defineConfig({
       events: 'events',
       util: 'util',
       stream: 'readable-stream',
+      'stream/web': 'readable-stream/web',
+      buffer: 'buffer',
     }
   },
   optimizeDeps: {
