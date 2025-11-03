@@ -112,7 +112,12 @@ export class AutomergeStore {
    */
   async updateMyCard(updates: Partial<AddressCard>): Promise<void> {
     await this.change('Update MyCard', (doc) => {
-      Object.assign(doc.myCard, updates);
+      // Automerge benötigt einzelne Zuweisungen statt Object.assign
+      for (const key in updates) {
+        if (Object.prototype.hasOwnProperty.call(updates, key)) {
+          (doc.myCard as any)[key] = (updates as any)[key];
+        }
+      }
       doc.myCard.updatedAt = new Date().toISOString();
     });
   }
@@ -145,7 +150,12 @@ export class AutomergeStore {
   ): Promise<void> {
     await this.change(`Update Connection ${id}`, (doc) => {
       if (doc.connections[id]) {
-        Object.assign(doc.connections[id], updates);
+        // Automerge benötigt einzelne Zuweisungen statt Object.assign
+        for (const key in updates) {
+          if (Object.prototype.hasOwnProperty.call(updates, key)) {
+            (doc.connections[id] as any)[key] = (updates as any)[key];
+          }
+        }
       }
     });
   }

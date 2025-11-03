@@ -14,4 +14,21 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
   },
+  define: {
+    'global': 'globalThis',
+  },
+  resolve: {
+    alias: {
+      events: 'events',
+      util: 'util',
+      stream: 'stream-browserify',
+    }
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      define: {
+        global: 'globalThis'
+      }
+    }
+  }
 });
