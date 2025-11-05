@@ -40,15 +40,10 @@ export class PeerConnection {
       trickle: true,
       config: {
         iceServers: [
-          // Google STUN servers
+          // Optimale Anzahl STUN-Server (3-4 für beste Performance)
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun2.l.google.com:19302' },
-          { urls: 'stun:stun3.l.google.com:19302' },
-          { urls: 'stun:stun4.l.google.com:19302' },
-          // Additional STUN servers for better connectivity
           { urls: 'stun:stun.services.mozilla.com' },
-          { urls: 'stun:stun.stunprotocol.org:3478' },
         ],
         iceTransportPolicy: 'all',
         bundlePolicy: 'max-bundle',
