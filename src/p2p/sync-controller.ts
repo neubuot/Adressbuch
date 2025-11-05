@@ -129,11 +129,23 @@ export class SyncController {
    */
   private async sendPolicy(): Promise<void> {
     const doc = store.getDoc();
-    const connection = doc.connections[this.peerId];
+    let connection = doc.connections[this.peerId];
 
+    // Falls Connection noch nicht existiert (eingehende Verbindung), erstelle eine
     if (!connection) {
-      console.error(`Verbindung ${this.peerId} nicht gefunden`);
-      return;
+      console.log(`⚠️  Connection für ${this.peerId} nicht gefunden, erstelle neue mit leerer Policy`);
+
+      // Erstelle Connection mit leerer Policy (privacy by default)
+      await store.addConnection(this.peerId, this._remotePubKey || '', []);
+
+      // Lade neu
+      const updatedDoc = store.getDoc();
+      connection = updatedDoc.connections[this.peerId];
+
+      if (!connection) {
+        console.error(`❌ Konnte Connection für ${this.peerId} nicht erstellen`);
+        return;
+      }
     }
 
     const policy: PolicyMessage = {
@@ -191,7 +203,7 @@ export class SyncController {
     const connection = doc.connections[this.peerId];
 
     if (!connection) {
-      console.error(`Verbindung ${this.peerId} nicht gefunden`);
+      console.warn(`⚠️  Connection ${this.peerId} nicht gefunden für STATE_HASH`);
       return;
     }
 
@@ -221,7 +233,7 @@ export class SyncController {
     const connection = doc.connections[this.peerId];
 
     if (!connection) {
-      console.error(`Verbindung ${this.peerId} nicht gefunden`);
+      console.warn(`⚠️  Connection ${this.peerId} nicht gefunden für PATCH`);
       return;
     }
 
