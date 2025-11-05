@@ -40,9 +40,25 @@ export class PeerConnection {
       trickle: true,
       config: {
         iceServers: [
+          // Google STUN servers
           { urls: 'stun:stun.l.google.com:19302' },
           { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
+          // Additional STUN servers for better connectivity
+          { urls: 'stun:stun.services.mozilla.com' },
+          { urls: 'stun:stun.stunprotocol.org:3478' },
         ],
+        iceTransportPolicy: 'all',
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
+        iceCandidatePoolSize: 10,
+      },
+      // Erhöhe Timeouts für bessere Verbindungsherstellung
+      offerOptions: {
+        offerToReceiveAudio: false,
+        offerToReceiveVideo: false,
       },
     });
 
@@ -75,6 +91,38 @@ export class PeerConnection {
       console.error(`WebRTC-Fehler mit ${this.peerId}:`, error);
       this.emit('error', { type: 'error', error });
     });
+
+    // Erweiterte ICE-Diagnose
+    if (this.peer._pc) {
+      this.peer._pc.addEventListener('iceconnectionstatechange', () => {
+        console.log(`🧊 ICE Connection State (${this.peerId}):`, this.peer?._pc?.iceConnectionState);
+      });
+
+      this.peer._pc.addEventListener('icegatheringstatechange', () => {
+        console.log(`📡 ICE Gathering State (${this.peerId}):`, this.peer?._pc?.iceGatheringState);
+      });
+
+      this.peer._pc.addEventListener('icecandidateerror', (event: any) => {
+        console.warn(`⚠️ ICE Candidate Error (${this.peerId}):`, {
+          errorCode: event.errorCode,
+          errorText: event.errorText,
+          url: event.url,
+          address: event.address,
+          port: event.port,
+        });
+      });
+
+      this.peer._pc.addEventListener('icecandidate', (event: RTCPeerConnectionIceEvent) => {
+        if (event.candidate) {
+          console.log(`🎯 ICE Candidate (${this.peerId}):`, {
+            type: event.candidate.type,
+            protocol: event.candidate.protocol,
+            address: event.candidate.address,
+            port: event.candidate.port,
+          });
+        }
+      });
+    }
   }
 
   /**
