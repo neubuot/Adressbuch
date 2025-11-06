@@ -151,11 +151,15 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
                   <div style={{ fontSize: '0.875rem', marginBottom: '0.5rem', padding: '0.5rem', backgroundColor: 'var(--background)', borderRadius: '0.25rem' }}>
                     <strong>Empfangene Daten:</strong>
                     <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                      {connection.remoteCard.firstName && <div><strong>Name:</strong> {connection.remoteCard.firstName} {connection.remoteCard.lastName}</div>}
+                      {(connection.remoteCard.firstName || connection.remoteCard.lastName) && (
+                        <div><strong>Name:</strong> {[connection.remoteCard.firstName, connection.remoteCard.lastName].filter(Boolean).join(' ')}</div>
+                      )}
                       {connection.remoteCard.email && <div><strong>E-Mail:</strong> {connection.remoteCard.email}</div>}
                       {connection.remoteCard.phone && <div><strong>Telefon:</strong> {connection.remoteCard.phone}</div>}
                       {connection.remoteCard.street && <div><strong>Straße:</strong> {connection.remoteCard.street}</div>}
-                      {connection.remoteCard.postalCode && <div><strong>PLZ/Ort:</strong> {connection.remoteCard.postalCode} {connection.remoteCard.city}</div>}
+                      {(connection.remoteCard.postalCode || connection.remoteCard.city) && (
+                        <div><strong>PLZ/Ort:</strong> {[connection.remoteCard.postalCode, connection.remoteCard.city].filter(Boolean).join(' ')}</div>
+                      )}
                       {connection.remoteCard.country && <div><strong>Land:</strong> {connection.remoteCard.country}</div>}
                       {connection.remoteCard.birthday && <div><strong>Geburtstag:</strong> {new Date(connection.remoteCard.birthday).toLocaleDateString('de-DE')}</div>}
                       {connection.remoteCard.organization && <div><strong>Organisation:</strong> {connection.remoteCard.organization}</div>}
