@@ -68,7 +68,20 @@ export async function getOrCreateKeyPair(): Promise<KeyPair> {
 }
 
 /**
+ * Generiert eine persistente Peer-ID aus dem Public Key
+ * Die ID ist deterministisch - gleicher Key = gleiche ID
+ */
+export async function createPeerIdFromPublicKey(publicKeyBase64: string): Promise<string> {
+  const publicKeyBuffer = base64ToArrayBuffer(publicKeyBase64);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', publicKeyBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  // Verwende den vollen Hash (32 bytes = 64 hex chars)
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
  * Generiert eine zufällige Peer-ID
+ * @deprecated Verwende createPeerIdFromPublicKey() für persistente IDs
  */
 export function generatePeerId(): string {
   const array = new Uint8Array(16);

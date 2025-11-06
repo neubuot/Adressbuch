@@ -5,7 +5,7 @@
 import { SignalingClient } from './signaling';
 import { PeerConnection } from './peer-connection';
 import { SyncController } from './sync-controller';
-import { getOrCreateKeyPair, generatePeerId, createFingerprint } from '../utils/crypto';
+import { getOrCreateKeyPair, createPeerIdFromPublicKey, createFingerprint } from '../utils/crypto';
 import { store } from '../store/automerge-store';
 import type { SignalData } from 'simple-peer';
 
@@ -15,13 +15,13 @@ export interface P2PManagerConfig {
 
 export class P2PManager {
   private signalingClient: SignalingClient | null = null;
-  private localPeerId: string;
+  private localPeerId: string = '';
   private localPubKey: string = '';
   private syncControllers: Map<string, SyncController> = new Map();
   private pendingConnections: Map<string, PeerConnection> = new Map();
 
   constructor(private config: P2PManagerConfig) {
-    this.localPeerId = generatePeerId();
+    // Peer-ID wird in init() gesetzt (async erforderlich)
   }
 
   /**
@@ -32,7 +32,10 @@ export class P2PManager {
     const keyPair = await getOrCreateKeyPair();
     this.localPubKey = keyPair.publicKey;
 
-    console.log(`🔑 Lokale Peer-ID: ${this.localPeerId}`);
+    // Generiere persistente Peer-ID aus Public Key
+    this.localPeerId = await createPeerIdFromPublicKey(this.localPubKey);
+
+    console.log(`🔑 Lokale Peer-ID: ${this.localPeerId.substring(0, 16)}...`);
     console.log(`🔑 Fingerprint: ${await createFingerprint(this.localPubKey)}`);
 
     // Signaling-Client verbinden
