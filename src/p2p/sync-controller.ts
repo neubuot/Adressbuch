@@ -280,29 +280,52 @@ export class SyncController {
     const connection = doc.connections[this.peerId];
 
     if (!connection || !connection.storeRemoteCard) {
-      console.log(`Speicherung für ${this.peerId} deaktiviert`);
+      console.log(`⚠️  Speicherung für ${this.peerId} deaktiviert`);
+      // ACK senden, auch wenn nicht gespeichert
+      const hash = stableHash(message.fields);
+      const ack: AckMessage = {
+        type: 'ACK',
+        hash,
+      };
+      this.peerConnection.send(ack);
+      console.log(`✅ ACK gesendet an ${this.peerId}: ${hash} (nicht gespeichert)`);
       return;
     }
 
-    // Speichere fremde Karte
-    await store.updateConnection(this.peerId, {
-      remoteCard: message.fields,
-      lastSyncAt: new Date().toISOString(),
-    });
+    try {
+      // Serialisiere message.fields zu plain object (kein Automerge-Proxy)
+      const remoteCardData = JSON.parse(JSON.stringify(message.fields));
 
-    // Berechne neuen Hash und sende ACK
-    const hash = stableHash(message.fields);
+      // Speichere fremde Karte
+      await store.updateConnection(this.peerId, {
+        remoteCard: remoteCardData,
+        lastSyncAt: new Date().toISOString(),
+      });
 
-    const ack: AckMessage = {
-      type: 'ACK',
-      hash,
-    };
+      // Berechne neuen Hash und sende ACK
+      const hash = stableHash(message.fields);
 
-    this.peerConnection.send(ack);
-    console.log(`✅ ACK gesendet an ${this.peerId}: ${hash}`);
+      const ack: AckMessage = {
+        type: 'ACK',
+        hash,
+      };
 
-    this.status = 'synced';
-    this.updateConnectionStatus('online');
+      this.peerConnection.send(ack);
+      console.log(`✅ ACK gesendet an ${this.peerId}: ${hash}`);
+
+      this.status = 'synced';
+      this.updateConnectionStatus('online');
+    } catch (error) {
+      console.error(`❌ Fehler beim Verarbeiten von PATCH von ${this.peerId}:`, error);
+      // Sende trotzdem ACK, um Endlosschleife zu vermeiden
+      const hash = stableHash(message.fields);
+      const ack: AckMessage = {
+        type: 'ACK',
+        hash,
+      };
+      this.peerConnection.send(ack);
+      console.log(`✅ ACK gesendet an ${this.peerId}: ${hash} (mit Fehler)`);
+    }
   }
 
   /**
