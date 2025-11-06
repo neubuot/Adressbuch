@@ -5,7 +5,7 @@
 import { SignalingClient } from './signaling';
 import { PeerConnection } from './peer-connection';
 import { SyncController } from './sync-controller';
-import { getOrCreateKeyPair, createPeerIdFromPublicKey, createFingerprint } from '../utils/crypto';
+import { getOrCreateKeyPair, generatePeerId, createFingerprint } from '../utils/crypto';
 import { store } from '../store/automerge-store';
 import type { SignalData } from 'simple-peer';
 
@@ -15,13 +15,14 @@ export interface P2PManagerConfig {
 
 export class P2PManager {
   private signalingClient: SignalingClient | null = null;
-  private localPeerId: string = '';
+  private localSessionId: string;
   private localPubKey: string = '';
   private syncControllers: Map<string, SyncController> = new Map();
   private pendingConnections: Map<string, PeerConnection> = new Map();
 
   constructor(private config: P2PManagerConfig) {
-    // Peer-ID wird in init() gesetzt (async erforderlich)
+    // Session-ID ist zufällig (pro Tab/Session)
+    this.localSessionId = generatePeerId();
   }
 
   /**
@@ -32,14 +33,11 @@ export class P2PManager {
     const keyPair = await getOrCreateKeyPair();
     this.localPubKey = keyPair.publicKey;
 
-    // Generiere persistente Peer-ID aus Public Key
-    this.localPeerId = await createPeerIdFromPublicKey(this.localPubKey);
-
-    console.log(`🔑 Lokale Peer-ID: ${this.localPeerId.substring(0, 16)}...`);
+    console.log(`🔑 Session-ID: ${this.localSessionId}`);
     console.log(`🔑 Fingerprint: ${await createFingerprint(this.localPubKey)}`);
 
-    // Signaling-Client verbinden
-    this.signalingClient = new SignalingClient(this.config.signalingUrl, this.localPeerId);
+    // Signaling-Client verbinden (verwendet Session-ID)
+    this.signalingClient = new SignalingClient(this.config.signalingUrl, this.localSessionId);
 
     this.signalingClient.on('peer-joined', (event) => {
       const remotePeerId = event.peerId as string;
@@ -193,10 +191,10 @@ export class P2PManager {
   }
 
   /**
-   * Gibt die lokale Peer-ID zurück
+   * Gibt die lokale Session-ID zurück
    */
   getLocalPeerId(): string {
-    return this.localPeerId;
+    return this.localSessionId;
   }
 
   /**
