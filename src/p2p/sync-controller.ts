@@ -134,7 +134,7 @@ export class SyncController {
   /**
    * Sendet die Policy (erlaubte Felder)
    */
-  private async sendPolicy(): Promise<void> {
+  private async sendPolicy(skipStateHash = false): Promise<void> {
     const doc = store.getDoc();
     let connection = doc.connections[this.peerId];
 
@@ -163,8 +163,10 @@ export class SyncController {
     this.peerConnection.send(policy);
     console.log(`📋 POLICY gesendet an ${this.peerId}:`, connection.allowedFields);
 
-    // Nach Policy-Austausch: State-Hash senden
-    setTimeout(() => this.sendStateHash(), 100);
+    // Nach Policy-Austausch: State-Hash senden (außer wenn skipStateHash = true)
+    if (!skipStateHash) {
+      setTimeout(() => this.sendStateHash(), 100);
+    }
   }
 
   /**
@@ -346,12 +348,18 @@ export class SyncController {
 
   /**
    * Triggert eine erneute Synchronisation
+   * Wird aufgerufen bei MyCard-Updates oder Policy-Updates
    */
   async resync(): Promise<void> {
     if (this.peerConnection.isConnected() && this.handshakeCompleted) {
+      console.log(`🔄 Resync für ${this.peerId}, sende POLICY + PATCH`);
       this.status = 'syncing';
-      // Sende neue Policy und dann STATE_HASH
-      await this.sendPolicy();
+      // Sende neue Policy (falls sie sich geändert hat)
+      await this.sendPolicy(true); // skipStateHash = true
+      // Dann sende PATCH mit den aktuellen Daten
+      setTimeout(() => {
+        this.sendPatch();
+      }, 50);
     }
   }
 
@@ -360,9 +368,14 @@ export class SyncController {
    */
   async updatePolicy(): Promise<void> {
     if (this.peerConnection.isConnected() && this.handshakeCompleted) {
-      console.log(`🔄 Policy-Update für ${this.peerId}, sende neue POLICY`);
+      console.log(`🔄 Policy-Update für ${this.peerId}, sende neue POLICY und PATCH`);
       this.status = 'syncing';
-      await this.sendPolicy();
+      // Sende neue Policy (skipStateHash = true)
+      await this.sendPolicy(true);
+      // Dann sende PATCH mit den jetzt freigegebenen Daten
+      setTimeout(() => {
+        this.sendPatch();
+      }, 50);
     }
   }
 
