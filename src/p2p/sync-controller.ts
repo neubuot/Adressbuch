@@ -185,27 +185,9 @@ export class SyncController {
 
   /**
    * Sendet den Hash des aktuellen freigegebenen States
+   * STATE_HASH = "Das ist der Hash von dem, was ich VON DIR habe"
    */
   private sendStateHash(): void {
-    const doc = store.getDoc();
-    const sharedFields = projectFields(doc.myCard, this.remoteAllowedFields);
-    const hash = stableHash(sharedFields);
-
-    const stateHash: StateHashMessage = {
-      type: 'STATE_HASH',
-      hash,
-    };
-
-    this.peerConnection.send(stateHash);
-    console.log(`#️⃣ STATE_HASH gesendet an ${this.peerId}: ${hash}`);
-  }
-
-  /**
-   * Verarbeitet STATE_HASH-Nachricht
-   */
-  private handleStateHash(message: StateHashMessage): void {
-    console.log(`#️⃣ STATE_HASH empfangen von ${this.peerId}: ${message.hash}`);
-
     const doc = store.getDoc();
     const connection = doc.connections[this.peerId];
 
@@ -214,15 +196,43 @@ export class SyncController {
       return;
     }
 
-    // Berechne eigenen Hash der freigegebenen Felder
+    // Hash von dem, was ich VON Remote habe (remoteCard)
+    const hash = connection.remoteCard ? stableHash(connection.remoteCard) : stableHash({});
+
+    const stateHash: StateHashMessage = {
+      type: 'STATE_HASH',
+      hash,
+    };
+
+    this.peerConnection.send(stateHash);
+    console.log(`#️⃣ STATE_HASH gesendet an ${this.peerId}: ${hash} (von remoteCard)`);
+  }
+
+  /**
+   * Verarbeitet STATE_HASH-Nachricht
+   * Remote sagt: "Das ist der Hash von dem, was ich VON DIR habe"
+   * Ich vergleiche: "Ist das der gleiche Hash wie das, was ICH sende?"
+   */
+  private handleStateHash(message: StateHashMessage): void {
+    const doc = store.getDoc();
+    const connection = doc.connections[this.peerId];
+
+    if (!connection) {
+      console.warn(`⚠️  Connection ${this.peerId} nicht gefunden für STATE_HASH`);
+      return;
+    }
+
+    // Hash von dem, was ICH sende (meine allowedFields)
     const sharedFields = projectFields(doc.myCard, connection.allowedFields);
     const localHash = stableHash(sharedFields);
+
+    console.log(`#️⃣ STATE_HASH empfangen von ${this.peerId}: remote=${message.hash}, lokal=${localHash}`);
 
     this._lastRemoteHash = message.hash;
 
     // Vergleiche Hashes
     if (localHash !== message.hash) {
-      console.log(`⚠️  Hash-Diskrepanz mit ${this.peerId}, sende PATCH`);
+      console.log(`⚠️  Hash-Diskrepanz → sende meine aktuellen Daten (PATCH)`);
       this.status = 'syncing';
       this.sendPatch();
     } else {
