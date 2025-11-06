@@ -28,9 +28,16 @@ export class SyncController {
   constructor(
     private peerId: string,
     private peerConnection: PeerConnection,
-    private localPubKey: string
+    private localPubKey: string,
+    alreadyConnected = false
   ) {
     this.setupListeners();
+
+    // Falls bereits verbunden, starte Handshake sofort
+    if (alreadyConnected) {
+      this.status = 'handshake';
+      this.startHandshake();
+    }
   }
 
   /**

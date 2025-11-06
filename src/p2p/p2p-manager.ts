@@ -126,7 +126,8 @@ export class P2PManager {
   private setupSyncController(peerId: string, peerConnection: PeerConnection): void {
     console.log(`✅ Verbindung zu ${peerId} hergestellt, richte Sync ein`);
 
-    const syncController = new SyncController(peerId, peerConnection, this.localPubKey);
+    // Verbindung ist bereits hergestellt, daher alreadyConnected = true
+    const syncController = new SyncController(peerId, peerConnection, this.localPubKey, true);
 
     this.syncControllers.set(peerId, syncController);
     this.pendingConnections.delete(peerId);
