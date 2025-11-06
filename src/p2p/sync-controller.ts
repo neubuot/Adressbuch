@@ -171,12 +171,17 @@ export class SyncController {
    * Verarbeitet POLICY-Nachricht
    */
   private handlePolicy(message: PolicyMessage): void {
-    console.log(`📋 POLICY empfangen von ${this.peerId}:`, message.allowedFields);
-
+    const oldFields = this.remoteAllowedFields;
     this.remoteAllowedFields = message.allowedFields;
 
-    // Nach Policy-Empfang: State-Hash senden (falls noch nicht geschehen)
+    // Prüfe, ob sich die Policy geändert hat
+    const policyChanged = JSON.stringify(oldFields.sort()) !== JSON.stringify(message.allowedFields.sort());
+
+    console.log(`📋 POLICY empfangen von ${this.peerId}:`, message.allowedFields, policyChanged ? '(geändert)' : '(unverändert)');
+
+    // Nach Policy-Empfang: State-Hash senden
     if (this.handshakeCompleted) {
+      // Policy hat sich geändert → sende STATE_HASH, um Update zu triggern
       this.sendStateHash();
     } else {
       this.handshakeCompleted = true;
@@ -322,7 +327,19 @@ export class SyncController {
   async resync(): Promise<void> {
     if (this.peerConnection.isConnected() && this.handshakeCompleted) {
       this.status = 'syncing';
-      this.sendStateHash();
+      // Sende neue Policy und dann STATE_HASH
+      await this.sendPolicy();
+    }
+  }
+
+  /**
+   * Aktualisiert die Policy und synchronisiert
+   */
+  async updatePolicy(): Promise<void> {
+    if (this.peerConnection.isConnected() && this.handshakeCompleted) {
+      console.log(`🔄 Policy-Update für ${this.peerId}, sende neue POLICY`);
+      this.status = 'syncing';
+      await this.sendPolicy();
     }
   }
 
