@@ -23,6 +23,9 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
     'lastName',
     'email',
   ]);
+  const [editingLabel, setEditingLabel] = useState<string | null>(null);
+  const [labelValue, setLabelValue] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const connections = Object.values(appState.connections);
 
@@ -59,6 +62,45 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
       alert('Synchronisation gestartet');
     }
   };
+
+  const handleStartEditLabel = (connectionId: string, currentLabel?: string) => {
+    setEditingLabel(connectionId);
+    setLabelValue(currentLabel || '');
+  };
+
+  const handleSaveLabel = async (connectionId: string) => {
+    await store.updateConnection(connectionId, {
+      label: labelValue.trim() || undefined,
+    });
+    setEditingLabel(null);
+    setLabelValue('');
+  };
+
+  const handleCancelEditLabel = () => {
+    setEditingLabel(null);
+    setLabelValue('');
+  };
+
+  // Filter connections based on search query
+  const filteredConnections = connections.filter((conn) => {
+    if (!searchQuery.trim()) return true;
+
+    const query = searchQuery.toLowerCase();
+    const label = (conn.label || '').toLowerCase();
+    const id = conn.id.toLowerCase();
+    const email = (conn.remoteCard?.email || '').toLowerCase();
+    const name = [conn.remoteCard?.firstName, conn.remoteCard?.lastName]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return (
+      label.includes(query) ||
+      id.includes(query) ||
+      email.includes(query) ||
+      name.includes(query)
+    );
+  });
 
   return (
     <div>
@@ -110,14 +152,36 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
       <div className="card">
         <h3 style={{ marginBottom: '1rem' }}>Aktive Verbindungen ({connections.length})</h3>
 
+        {connections.length > 0 && (
+          <div className="form-group" style={{ marginBottom: '1rem' }}>
+            <input
+              type="text"
+              placeholder="🔍 Suche nach Name, Label, E-Mail oder ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ width: '100%' }}
+            />
+            {searchQuery && (
+              <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                {filteredConnections.length} von {connections.length} Verbindungen gefunden
+              </div>
+            )}
+          </div>
+        )}
+
         {connections.length === 0 ? (
           <div className="empty-state">
             <h3>Keine Verbindungen</h3>
             <p>Erstelle eine Einladung oder verbinde dich mit einem Code</p>
           </div>
+        ) : filteredConnections.length === 0 ? (
+          <div className="empty-state">
+            <h3>Keine Treffer</h3>
+            <p>Keine Verbindungen entsprechen deiner Suche</p>
+          </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {connections.map((connection) => (
+            {filteredConnections.map((connection) => (
               <div
                 key={connection.id}
                 style={{
@@ -127,9 +191,50 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '0.5rem' }}>
-                  <div>
-                    <strong>{connection.label || connection.id.substring(0, 8)}</strong>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  <div style={{ flex: 1, marginRight: '1rem' }}>
+                    {editingLabel === connection.id ? (
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          value={labelValue}
+                          onChange={(e) => setLabelValue(e.target.value)}
+                          placeholder="z.B. Max Mustermann"
+                          style={{ flex: 1, fontSize: '1rem', padding: '0.25rem 0.5rem' }}
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleSaveLabel(connection.id);
+                            if (e.key === 'Escape') handleCancelEditLabel();
+                          }}
+                        />
+                        <button
+                          className="btn btn-primary btn-small"
+                          onClick={() => handleSaveLabel(connection.id)}
+                          style={{ padding: '0.25rem 0.5rem' }}
+                        >
+                          ✓
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-small"
+                          onClick={handleCancelEditLabel}
+                          style={{ padding: '0.25rem 0.5rem' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <strong>{connection.label || connection.id.substring(0, 8)}</strong>
+                        <button
+                          className="btn btn-secondary btn-small"
+                          onClick={() => handleStartEditLabel(connection.id, connection.label)}
+                          style={{ padding: '0.125rem 0.375rem', fontSize: '0.75rem' }}
+                          title="Namen bearbeiten"
+                        >
+                          ✏️
+                        </button>
+                      </div>
+                    )}
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
                       ID: {connection.id}
                     </div>
                   </div>
