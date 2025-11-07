@@ -26,6 +26,8 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
   const [editingLabel, setEditingLabel] = useState<string | null>(null);
   const [labelValue, setLabelValue] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState<'name' | 'status' | 'lastSync'>('name');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'online' | 'offline'>('all');
 
   const connections = Object.values(appState.connections);
 
@@ -81,26 +83,51 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
     setLabelValue('');
   };
 
-  // Filter connections based on search query
-  const filteredConnections = connections.filter((conn) => {
-    if (!searchQuery.trim()) return true;
+  // Filter and sort connections
+  const filteredConnections = connections
+    // Apply status filter
+    .filter((conn) => {
+      if (filterStatus === 'all') return true;
+      return conn.status === filterStatus;
+    })
+    // Apply search query
+    .filter((conn) => {
+      if (!searchQuery.trim()) return true;
 
-    const query = searchQuery.toLowerCase();
-    const label = (conn.label || '').toLowerCase();
-    const id = conn.id.toLowerCase();
-    const email = (conn.remoteCard?.email || '').toLowerCase();
-    const name = [conn.remoteCard?.firstName, conn.remoteCard?.lastName]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
+      const query = searchQuery.toLowerCase();
+      const label = (conn.label || '').toLowerCase();
+      const id = conn.id.toLowerCase();
+      const email = (conn.remoteCard?.email || '').toLowerCase();
+      const name = [conn.remoteCard?.firstName, conn.remoteCard?.lastName]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
 
-    return (
-      label.includes(query) ||
-      id.includes(query) ||
-      email.includes(query) ||
-      name.includes(query)
-    );
-  });
+      return (
+        label.includes(query) ||
+        id.includes(query) ||
+        email.includes(query) ||
+        name.includes(query)
+      );
+    })
+    // Apply sorting
+    .sort((a, b) => {
+      if (sortBy === 'name') {
+        const nameA = a.label || a.remoteCard?.firstName || a.id;
+        const nameB = b.label || b.remoteCard?.firstName || b.id;
+        return nameA.localeCompare(nameB, 'de-DE');
+      } else if (sortBy === 'status') {
+        // Online first, then syncing, then offline
+        const statusOrder = { online: 0, syncing: 1, offline: 2 };
+        return statusOrder[a.status] - statusOrder[b.status];
+      } else if (sortBy === 'lastSync') {
+        // Most recent first
+        const timeA = a.lastSyncAt ? new Date(a.lastSyncAt).getTime() : 0;
+        const timeB = b.lastSyncAt ? new Date(b.lastSyncAt).getTime() : 0;
+        return timeB - timeA;
+      }
+      return 0;
+    });
 
   return (
     <div>
@@ -166,6 +193,47 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
                 {filteredConnections.length} von {connections.length} Verbindungen gefunden
               </div>
             )}
+          </div>
+        )}
+
+        {connections.length > 0 && (
+          <div style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Status Filter */}
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Filter:</span>
+              <button
+                className={`btn btn-small ${filterStatus === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setFilterStatus('all')}
+              >
+                Alle ({connections.length})
+              </button>
+              <button
+                className={`btn btn-small ${filterStatus === 'online' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setFilterStatus('online')}
+              >
+                🟢 Online ({connections.filter(c => c.status === 'online').length})
+              </button>
+              <button
+                className={`btn btn-small ${filterStatus === 'offline' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setFilterStatus('offline')}
+              >
+                🔴 Offline ({connections.filter(c => c.status === 'offline').length})
+              </button>
+            </div>
+
+            {/* Sortierung */}
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Sortieren:</span>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as 'name' | 'status' | 'lastSync')}
+                style={{ padding: '0.375rem 0.75rem', borderRadius: '0.375rem', border: '1px solid var(--border)' }}
+              >
+                <option value="name">Nach Name</option>
+                <option value="status">Nach Status</option>
+                <option value="lastSync">Nach letzter Sync</option>
+              </select>
+            </div>
           </div>
         )}
 
