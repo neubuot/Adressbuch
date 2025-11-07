@@ -19,6 +19,14 @@ export interface AddressCard {
   updatedAt: string; // ISO timestamp (UI/Historie)
 }
 
+// Tag für Kategorisierung von Connections
+export interface Tag {
+  id: string; // unique tag id
+  name: string; // display name (z.B. "Arbeit", "Familie")
+  color: string; // hex color (z.B. "#3b82f6")
+  createdAt: string; // ISO timestamp
+}
+
 // Verbindung zu einem Peer
 export interface Connection {
   id: string; // peerId
@@ -29,12 +37,14 @@ export interface Connection {
   lastSyncAt?: string;
   status: 'online' | 'offline' | 'syncing';
   remoteCard?: Partial<AddressCard>; // gespeicherte fremde Karte
+  tagIds?: string[]; // zugewiesene Tags
 }
 
 // Gesamter App-State
 export interface AppState {
   myCard: AddressCard;
   connections: Record<string, Connection>;
+  tags: Record<string, Tag>; // verfügbare Tags
   knownPeers: string[]; // optional, für Discovery/History
 }
 

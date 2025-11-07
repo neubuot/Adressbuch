@@ -7,6 +7,7 @@ import { useAppContext } from '../context/AppContext';
 import { store } from '../store/automerge-store';
 import { getP2PManager } from '../p2p/p2p-manager';
 import { ConnectionInvite } from './ConnectionInvite';
+import { TagManager } from './TagManager';
 
 interface ConnectionsProps {
   onBack: () => void;
@@ -29,8 +30,12 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
   const [sortBy, setSortBy] = useState<'name' | 'status' | 'lastSync'>('name');
   const [filterStatus, setFilterStatus] = useState<'all' | 'online' | 'offline'>('all');
   const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
+  const [showTagManager, setShowTagManager] = useState(false);
+  const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null);
+  const [editingTags, setEditingTags] = useState<string | null>(null);
 
   const connections = Object.values(appState.connections);
+  const tags = Object.values(appState.tags);
 
   const handleCreateInvite = () => {
     setShowInvite(true);
@@ -84,12 +89,31 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
     setLabelValue('');
   };
 
+  const handleToggleTag = async (connectionId: string, tagId: string) => {
+    const connection = appState.connections[connectionId];
+    if (!connection) return;
+
+    const currentTags = connection.tagIds || [];
+    if (currentTags.includes(tagId)) {
+      // Entferne Tag
+      await store.removeTagsFromConnection(connectionId, [tagId]);
+    } else {
+      // Füge Tag hinzu
+      await store.addTagsToConnection(connectionId, [tagId]);
+    }
+  };
+
   // Filter and sort connections
   const filteredConnections = connections
     // Apply status filter
     .filter((conn) => {
       if (filterStatus === 'all') return true;
       return conn.status === filterStatus;
+    })
+    // Apply tag filter
+    .filter((conn) => {
+      if (!selectedTagFilter) return true;
+      return conn.tagIds?.includes(selectedTagFilter);
     })
     // Apply search query
     .filter((conn) => {
@@ -147,6 +171,9 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
           <button className="btn btn-secondary" onClick={() => setShowJoin(!showJoin)}>
             📥 Mit Code verbinden
           </button>
+          <button className="btn btn-secondary" onClick={() => setShowTagManager(true)}>
+            🏷️ Tags verwalten
+          </button>
         </div>
 
         {showJoin && (
@@ -176,6 +203,8 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
           onClose={() => setShowInvite(false)}
         />
       )}
+
+      {showTagManager && <TagManager onClose={() => setShowTagManager(false)} />}
 
       <div className="card">
         <h3 style={{ marginBottom: '1rem' }}>Aktive Verbindungen ({connections.length})</h3>
@@ -240,6 +269,34 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
                 🔴 Offline ({connections.filter(c => c.status === 'offline').length})
               </button>
             </div>
+
+            {/* Tag Filter */}
+            {tags.length > 0 && (
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Tags:</span>
+                <button
+                  className={`btn btn-small ${!selectedTagFilter ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => setSelectedTagFilter(null)}
+                >
+                  Alle
+                </button>
+                {tags.map((tag) => {
+                  const count = connections.filter(c => c.tagIds?.includes(tag.id)).length;
+                  return (
+                    <button
+                      key={tag.id}
+                      className={`btn btn-small ${selectedTagFilter === tag.id ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => setSelectedTagFilter(tag.id)}
+                      style={{
+                        borderLeft: `3px solid ${tag.color}`,
+                      }}
+                    >
+                      {tag.name} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             {/* Sortierung */}
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -342,6 +399,73 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
                     Letzte Synchronisation: {new Date(connection.lastSyncAt).toLocaleString('de-DE')}
                   </div>
                 )}
+
+                {/* Tags */}
+                <div style={{ marginBottom: '0.5rem' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Tags:</span>
+                    {connection.tagIds && connection.tagIds.length > 0 ? (
+                      connection.tagIds.map((tagId) => {
+                        const tag = appState.tags[tagId];
+                        if (!tag) return null;
+                        return (
+                          <span
+                            key={tagId}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              padding: '0.25rem 0.5rem',
+                              fontSize: '0.75rem',
+                              borderRadius: '0.25rem',
+                              backgroundColor: tag.color + '20',
+                              borderLeft: `3px solid ${tag.color}`,
+                              cursor: 'pointer',
+                            }}
+                            onClick={() => handleToggleTag(connection.id, tagId)}
+                            title="Klicken zum Entfernen"
+                          >
+                            {tag.name}
+                            <span style={{ opacity: 0.6 }}>×</span>
+                          </span>
+                        );
+                      })
+                    ) : (
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                        Keine Tags
+                      </span>
+                    )}
+                    {tags.length > 0 && (
+                      <button
+                        className="btn btn-secondary btn-small"
+                        onClick={() => setEditingTags(editingTags === connection.id ? null : connection.id)}
+                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                      >
+                        {editingTags === connection.id ? '✓ Fertig' : '+ Tag hinzufügen'}
+                      </button>
+                    )}
+                  </div>
+                  {editingTags === connection.id && (
+                    <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                      {tags
+                        .filter((tag) => !connection.tagIds?.includes(tag.id))
+                        .map((tag) => (
+                          <button
+                            key={tag.id}
+                            className="btn btn-secondary btn-small"
+                            onClick={() => handleToggleTag(connection.id, tag.id)}
+                            style={{
+                              padding: '0.25rem 0.5rem',
+                              fontSize: '0.75rem',
+                              borderLeft: `3px solid ${tag.color}`,
+                            }}
+                          >
+                            + {tag.name}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
 
                 {connection.remoteCard && (
                   <div style={{ fontSize: '0.875rem', marginBottom: '0.5rem', padding: '0.5rem', backgroundColor: 'var(--background)', borderRadius: '0.25rem' }}>
@@ -512,6 +636,31 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.125rem' }}>
                         {connection.id.substring(0, 12)}...
                       </div>
+                      {/* Tags in List View */}
+                      {connection.tagIds && connection.tagIds.length > 0 && (
+                        <div style={{ display: 'flex', gap: '0.25rem', marginTop: '0.375rem', flexWrap: 'wrap' }}>
+                          {connection.tagIds.map((tagId) => {
+                            const tag = appState.tags[tagId];
+                            if (!tag) return null;
+                            return (
+                              <span
+                                key={tagId}
+                                style={{
+                                  display: 'inline-block',
+                                  padding: '0.125rem 0.375rem',
+                                  fontSize: '0.625rem',
+                                  borderRadius: '0.25rem',
+                                  backgroundColor: tag.color + '20',
+                                  borderLeft: `2px solid ${tag.color}`,
+                                }}
+                                title={tag.name}
+                              >
+                                {tag.name}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
                     </td>
 
                     {/* Contact Column */}
@@ -554,6 +703,16 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
                     {/* Actions Column */}
                     <td style={{ padding: '0.75rem', textAlign: 'right' }}>
                       <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end' }}>
+                        {tags.length > 0 && (
+                          <button
+                            className="btn btn-secondary btn-small"
+                            onClick={() => setEditingTags(editingTags === connection.id ? null : connection.id)}
+                            title="Tags bearbeiten"
+                            style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                          >
+                            🏷️
+                          </button>
+                        )}
                         <button
                           className="btn btn-secondary btn-small"
                           onClick={() => onEditPolicy(connection.id)}
@@ -585,6 +744,46 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
                 ))}
               </tbody>
             </table>
+
+            {/* Tag-Auswahl Popup für List-View */}
+            {editingTags && viewMode === 'list' && (
+              <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: 'var(--background)', borderRadius: '0.375rem', border: '1px solid var(--border)' }}>
+                <h4 style={{ marginBottom: '0.75rem', fontSize: '0.875rem' }}>
+                  Tags bearbeiten für: {
+                    (() => {
+                      const conn = connections.find(c => c.id === editingTags);
+                      return conn?.label || conn?.id.substring(0, 8);
+                    })()
+                  }
+                </h4>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                  {tags.map((tag) => {
+                    const conn = connections.find(c => c.id === editingTags);
+                    const isSelected = conn?.tagIds?.includes(tag.id);
+                    return (
+                      <button
+                        key={tag.id}
+                        className={`btn btn-small ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => handleToggleTag(editingTags, tag.id)}
+                        style={{
+                          padding: '0.375rem 0.75rem',
+                          fontSize: '0.875rem',
+                          borderLeft: `3px solid ${tag.color}`,
+                        }}
+                      >
+                        {isSelected ? '✓ ' : ''}{tag.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  className="btn btn-secondary btn-small"
+                  onClick={() => setEditingTags(null)}
+                >
+                  ✓ Fertig
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

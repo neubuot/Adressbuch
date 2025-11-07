@@ -31,6 +31,7 @@ export class AutomergeStore {
         updatedAt: new Date().toISOString(),
       },
       connections: {},
+      tags: {},
       knownPeers: [],
     };
     this.doc = Automerge.from(initialState as Record<string, unknown>) as Automerge.Doc<AppState>;
@@ -52,6 +53,14 @@ export class AutomergeStore {
           for (const change of stored.changes) {
             this.doc = Automerge.loadIncremental(this.doc, change);
           }
+        }
+
+        // Migration: Füge tags-Feld hinzu falls es nicht existiert
+        if (!this.doc.tags) {
+          this.doc = Automerge.change(this.doc, 'Add tags field', (doc) => {
+            doc.tags = {};
+          });
+          await this.save();
         }
 
         const connectionCount = Object.keys(this.doc.connections).length;
@@ -174,6 +183,93 @@ export class AutomergeStore {
   async removeConnection(id: string): Promise<void> {
     await this.change(`Remove Connection ${id}`, (doc) => {
       delete doc.connections[id];
+    });
+  }
+
+  /**
+   * Fügt einen Tag hinzu
+   */
+  async addTag(id: string, name: string, color: string): Promise<void> {
+    await this.change('Add Tag', (doc) => {
+      doc.tags[id] = {
+        id,
+        name,
+        color,
+        createdAt: new Date().toISOString(),
+      };
+    });
+  }
+
+  /**
+   * Aktualisiert einen Tag
+   */
+  async updateTag(id: string, updates: { name?: string; color?: string }): Promise<void> {
+    await this.change(`Update Tag ${id}`, (doc) => {
+      if (doc.tags[id]) {
+        if (updates.name !== undefined) doc.tags[id].name = updates.name;
+        if (updates.color !== undefined) doc.tags[id].color = updates.color;
+      }
+    });
+  }
+
+  /**
+   * Löscht einen Tag (und entfernt ihn von allen Connections)
+   */
+  async removeTag(id: string): Promise<void> {
+    await this.change(`Remove Tag ${id}`, (doc) => {
+      // Entferne Tag von allen Connections
+      for (const connId in doc.connections) {
+        const conn = doc.connections[connId];
+        if (conn.tagIds && conn.tagIds.includes(id)) {
+          conn.tagIds = conn.tagIds.filter((tagId) => tagId !== id);
+        }
+      }
+      // Lösche den Tag
+      delete doc.tags[id];
+    });
+  }
+
+  /**
+   * Fügt Tags zu einer Connection hinzu
+   */
+  async addTagsToConnection(connectionId: string, tagIds: string[]): Promise<void> {
+    await this.change(`Add Tags to Connection ${connectionId}`, (doc) => {
+      const conn = doc.connections[connectionId];
+      if (conn) {
+        if (!conn.tagIds) {
+          conn.tagIds = [];
+        }
+        // Füge nur neue Tags hinzu (keine Duplikate)
+        for (const tagId of tagIds) {
+          if (!conn.tagIds.includes(tagId)) {
+            conn.tagIds.push(tagId);
+          }
+        }
+      }
+    });
+  }
+
+  /**
+   * Entfernt Tags von einer Connection
+   */
+  async removeTagsFromConnection(connectionId: string, tagIds: string[]): Promise<void> {
+    await this.change(`Remove Tags from Connection ${connectionId}`, (doc) => {
+      const conn = doc.connections[connectionId];
+      if (conn && conn.tagIds) {
+        conn.tagIds = conn.tagIds.filter((tagId) => !tagIds.includes(tagId));
+      }
+    });
+  }
+
+  /**
+   * Setzt die Tags einer Connection (ersetzt alle bestehenden Tags)
+   */
+  async setConnectionTags(connectionId: string, tagIds: string[]): Promise<void> {
+    await this.change(`Set Connection Tags ${connectionId}`, (doc) => {
+      const conn = doc.connections[connectionId];
+      if (conn) {
+        conn.tagIds = tagIds;
+      }
     });
   }
 
