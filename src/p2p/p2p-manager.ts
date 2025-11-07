@@ -197,10 +197,8 @@ export class P2PManager {
     this.syncControllers.set(peerId, syncController);
     this.pendingConnections.delete(peerId);
 
-    // Update Store
-    store.updateConnection(peerId, {
-      status: 'syncing',
-    });
+    // HINWEIS: Store-Update erfolgt automatisch im SyncController nach HELLO-Austausch,
+    // wenn die echte Connection-ID (Fingerprint) bekannt ist
   }
 
   /**
@@ -209,7 +207,7 @@ export class P2PManager {
   private removeConnection(peerId: string): void {
     const syncController = this.syncControllers.get(peerId);
     if (syncController) {
-      syncController.destroy();
+      syncController.destroy(); // Setzt Status automatisch auf 'offline' mit richtiger Connection-ID
       this.syncControllers.delete(peerId);
     }
 
@@ -219,9 +217,8 @@ export class P2PManager {
       this.pendingConnections.delete(peerId);
     }
 
-    store.updateConnection(peerId, {
-      status: 'offline',
-    });
+    // HINWEIS: Store-Update erfolgt automatisch in syncController.destroy()
+    // mit der korrekten Connection-ID (Fingerprint), nicht mit der Session-ID
   }
 
   /**
