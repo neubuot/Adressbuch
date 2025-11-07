@@ -41,6 +41,7 @@ export class AutomergeStore {
    */
   async load(): Promise<void> {
     try {
+      console.log('🔍 Store.load(): Lade Dokument aus IndexedDB...');
       const stored = await db.documents.get(this.docId);
 
       if (stored) {
@@ -54,14 +55,21 @@ export class AutomergeStore {
           }
         }
 
-        console.log('Automerge-Dokument geladen', Automerge.getHeads(this.doc));
+        const connectionCount = Object.keys(this.doc.connections).length;
+        console.log('✅ Automerge-Dokument geladen:', {
+          heads: Automerge.getHeads(this.doc),
+          connectionCount,
+          connections: Object.keys(this.doc.connections),
+          updatedAt: stored.updatedAt,
+        });
       } else {
         // Erstes Mal: Speichere initiales Dokument
+        console.log('🆕 Kein gespeichertes Dokument gefunden, erstelle neues');
         await this.save();
         console.log('Neues Automerge-Dokument initialisiert');
       }
     } catch (error) {
-      console.error('Fehler beim Laden des Automerge-Dokuments', error);
+      console.error('❌ Fehler beim Laden des Automerge-Dokuments', error);
       // Bei Fehler: nutze leeres Dokument
       await this.save();
     }
@@ -72,6 +80,12 @@ export class AutomergeStore {
    */
   async save(): Promise<void> {
     try {
+      const connectionCount = Object.keys(this.doc.connections).length;
+      console.log('💾 Store.save(): Speichere Dokument in IndexedDB...', {
+        connectionCount,
+        connections: Object.keys(this.doc.connections),
+      });
+
       const snapshot = Automerge.save(this.doc);
 
       const stored: StoredDocument = {
@@ -82,8 +96,17 @@ export class AutomergeStore {
       };
 
       await db.documents.put(stored);
+      console.log('✅ Store.save(): Erfolgreich gespeichert');
+
+      // Verifikation: Lese sofort zurück
+      const verification = await db.documents.get(this.docId);
+      if (verification) {
+        const verifiedDoc = Automerge.load<AppState>(verification.snapshot);
+        const verifiedCount = Object.keys(verifiedDoc.connections).length;
+        console.log('✔️ Store.save(): Verifikation - Connections in DB:', verifiedCount);
+      }
     } catch (error) {
-      console.error('Fehler beim Speichern des Automerge-Dokuments', error);
+      console.error('❌ Fehler beim Speichern des Automerge-Dokuments', error);
     }
   }
 
@@ -136,6 +159,7 @@ export class AutomergeStore {
     peerPubKey: string,
     allowedFields: string[]
   ): Promise<void> {
+    console.log('➕ Store.addConnection():', { id, allowedFields });
     await this.change('Add Connection', (doc) => {
       doc.connections[id] = {
         id,
@@ -145,6 +169,7 @@ export class AutomergeStore {
         status: 'offline',
       };
     });
+    console.log('✅ Store.addConnection() abgeschlossen, Connections:', Object.keys(this.doc.connections));
   }
 
   /**
@@ -154,6 +179,7 @@ export class AutomergeStore {
     id: string,
     updates: Partial<typeof this.doc.connections[string]>
   ): Promise<void> {
+    console.log('🔄 Store.updateConnection():', { id, updates: Object.keys(updates) });
     await this.change(`Update Connection ${id}`, (doc) => {
       if (doc.connections[id]) {
         // Automerge benötigt einzelne Zuweisungen statt Object.assign
@@ -162,6 +188,8 @@ export class AutomergeStore {
             (doc.connections[id] as any)[key] = (updates as any)[key];
           }
         }
+      } else {
+        console.warn('⚠️ Store.updateConnection(): Connection nicht gefunden:', id);
       }
     });
   }
