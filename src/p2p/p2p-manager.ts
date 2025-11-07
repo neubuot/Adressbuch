@@ -5,7 +5,7 @@
 import { SignalingClient } from './signaling';
 import { PeerConnection } from './peer-connection';
 import { SyncController } from './sync-controller';
-import { getOrCreateKeyPair, generatePeerId, createFingerprint } from '../utils/crypto';
+import { getOrCreateKeyPair, generatePeerId, createFingerprint, generatePersistentRoomCode } from '../utils/crypto';
 import { store } from '../store/automerge-store';
 import type { SignalData } from 'simple-peer';
 
@@ -74,6 +74,39 @@ export class P2PManager {
     });
 
     await this.signalingClient.connect();
+
+    // Auto-Reconnect zu bekannten Peers
+    await this.autoReconnect();
+  }
+
+  /**
+   * Versucht automatisch zu allen bekannten Peers zu reconnecten
+   */
+  private async autoReconnect(): Promise<void> {
+    const doc = store.getDoc();
+    const connections = Object.values(doc.connections);
+
+    if (connections.length === 0) {
+      console.log('📭 Keine bekannten Connections für Auto-Reconnect');
+      return;
+    }
+
+    console.log(`🔄 Auto-Reconnect: Versuche zu ${connections.length} bekannten Peer(s) zu verbinden...`);
+
+    const myFingerprint = await createFingerprint(this.localPubKey);
+
+    for (const connection of connections) {
+      try {
+        // Berechne persistenten Room-Code aus beiden Fingerprints
+        const roomCode = await generatePersistentRoomCode(myFingerprint, connection.id);
+        console.log(`🔗 Auto-Reconnect zu ${connection.id}: Trete persistentem Room ${roomCode} bei`);
+
+        // Tritt dem persistenten Room bei
+        this.joinRoom(roomCode);
+      } catch (error) {
+        console.error(`❌ Fehler beim Auto-Reconnect zu ${connection.id}:`, error);
+      }
+    }
   }
 
   /**

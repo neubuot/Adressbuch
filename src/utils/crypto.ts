@@ -90,6 +90,29 @@ export function generatePeerId(): string {
 }
 
 /**
+ * Generiert einen deterministischen Room-Code aus zwei Fingerprints
+ * Dieser Code ist immer gleich, unabhängig von der Reihenfolge
+ */
+export async function generatePersistentRoomCode(
+  fingerprint1: string,
+  fingerprint2: string
+): Promise<string> {
+  // Sortiere Fingerprints für Reihenfolge-Unabhängigkeit
+  const sorted = [fingerprint1, fingerprint2].sort();
+  const combined = sorted.join('-');
+
+  // Hash kombinierte Fingerprints
+  const encoder = new TextEncoder();
+  const data = encoder.encode(combined);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+
+  // Konvertiere zu 8-stelligem Code (wie normale Codes)
+  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  return hashHex.substring(0, 8).toUpperCase();
+}
+
+/**
  * Generiert einen 8-stelligen Verbindungscode
  */
 export function generateConnectionCode(): string {
