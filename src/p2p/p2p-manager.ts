@@ -75,16 +75,25 @@ export class P2PManager {
 
     await this.signalingClient.connect();
 
+    console.log('🚀 Signaling-Client verbunden, starte Auto-Reconnect...');
+
     // Auto-Reconnect zu bekannten Peers
     await this.autoReconnect();
+
+    console.log('✅ P2PManager vollständig initialisiert');
   }
 
   /**
    * Versucht automatisch zu allen bekannten Peers zu reconnecten
    */
   private async autoReconnect(): Promise<void> {
+    console.log('🔍 Auto-Reconnect: Prüfe Store...');
+
     const doc = store.getDoc();
+    console.log('📚 Store geladen, Connections:', doc.connections);
+
     const connections = Object.values(doc.connections);
+    console.log(`📊 Anzahl Connections im Store: ${connections.length}`);
 
     if (connections.length === 0) {
       console.log('📭 Keine bekannten Connections für Auto-Reconnect');
