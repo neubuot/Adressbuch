@@ -28,6 +28,7 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'name' | 'status' | 'lastSync'>('name');
   const [filterStatus, setFilterStatus] = useState<'all' | 'online' | 'offline'>('all');
+  const [viewMode, setViewMode] = useState<'card' | 'list'>('card');
 
   const connections = Object.values(appState.connections);
 
@@ -198,6 +199,25 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
 
         {connections.length > 0 && (
           <div style={{ marginBottom: '1rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Ansicht wechseln */}
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Ansicht:</span>
+              <button
+                className={`btn btn-small ${viewMode === 'card' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setViewMode('card')}
+                title="Karten-Ansicht"
+              >
+                📋 Karten
+              </button>
+              <button
+                className={`btn btn-small ${viewMode === 'list' ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setViewMode('list')}
+                title="Listen-Ansicht"
+              >
+                📊 Liste
+              </button>
+            </div>
+
             {/* Status Filter */}
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               <span style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Filter:</span>
@@ -247,7 +267,8 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
             <h3>Keine Treffer</h3>
             <p>Keine Verbindungen entsprechen deiner Suche</p>
           </div>
-        ) : (
+        ) : viewMode === 'card' ? (
+          /* Card View */
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {filteredConnections.map((connection) => (
               <div
@@ -365,6 +386,205 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
                 </div>
               </div>
             ))}
+          </div>
+        ) : (
+          /* List View - Kompakte Tabellenansicht */
+          <div style={{ border: '1px solid var(--border)', borderRadius: '0.375rem', overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead style={{ backgroundColor: 'var(--background)', borderBottom: '2px solid var(--border)' }}>
+                <tr>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>Status</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>Name/Label</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>Kontakt</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'left', fontSize: '0.875rem', fontWeight: 600 }}>Letzte Sync</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'right', fontSize: '0.875rem', fontWeight: 600 }}>Aktionen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredConnections.map((connection) => (
+                  <tr
+                    key={connection.id}
+                    style={{
+                      borderBottom: '1px solid var(--border)',
+                      transition: 'background-color 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--background)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    {/* Status Column */}
+                    <td style={{ padding: '0.75rem', width: '5rem' }}>
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          width: '0.75rem',
+                          height: '0.75rem',
+                          borderRadius: '50%',
+                          backgroundColor:
+                            connection.status === 'online'
+                              ? '#10b981'
+                              : connection.status === 'syncing'
+                              ? '#f59e0b'
+                              : '#6b7280',
+                        }}
+                        title={
+                          connection.status === 'online'
+                            ? 'Online'
+                            : connection.status === 'syncing'
+                            ? 'Synchronisiert'
+                            : 'Offline'
+                        }
+                      />
+                    </td>
+
+                    {/* Name/Label Column */}
+                    <td style={{ padding: '0.75rem', minWidth: '12rem' }}>
+                      {editingLabel === connection.id ? (
+                        <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
+                          <input
+                            type="text"
+                            value={labelValue}
+                            onChange={(e) => setLabelValue(e.target.value)}
+                            placeholder="Name/Label"
+                            style={{
+                              flex: 1,
+                              fontSize: '0.875rem',
+                              padding: '0.25rem 0.5rem',
+                              minWidth: '8rem',
+                            }}
+                            autoFocus
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveLabel(connection.id);
+                              if (e.key === 'Escape') handleCancelEditLabel();
+                            }}
+                          />
+                          <button
+                            onClick={() => handleSaveLabel(connection.id)}
+                            style={{
+                              padding: '0.25rem 0.5rem',
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                              border: '1px solid var(--border)',
+                              borderRadius: '0.25rem',
+                              backgroundColor: 'var(--primary)',
+                              color: 'white',
+                            }}
+                          >
+                            ✓
+                          </button>
+                          <button
+                            onClick={handleCancelEditLabel}
+                            style={{
+                              padding: '0.25rem 0.5rem',
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                              border: '1px solid var(--border)',
+                              borderRadius: '0.25rem',
+                            }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ fontSize: '0.875rem', fontWeight: 500 }}>
+                            {connection.label || connection.id.substring(0, 8)}
+                          </span>
+                          <button
+                            onClick={() => handleStartEditLabel(connection.id, connection.label)}
+                            style={{
+                              padding: '0.125rem 0.25rem',
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                              border: '1px solid var(--border)',
+                              borderRadius: '0.25rem',
+                              backgroundColor: 'transparent',
+                            }}
+                            title="Namen bearbeiten"
+                          >
+                            ✏️
+                          </button>
+                        </div>
+                      )}
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.125rem' }}>
+                        {connection.id.substring(0, 12)}...
+                      </div>
+                    </td>
+
+                    {/* Contact Column */}
+                    <td style={{ padding: '0.75rem', fontSize: '0.875rem' }}>
+                      {connection.remoteCard ? (
+                        <div>
+                          {(connection.remoteCard.firstName || connection.remoteCard.lastName) && (
+                            <div style={{ fontWeight: 500 }}>
+                              {[connection.remoteCard.firstName, connection.remoteCard.lastName]
+                                .filter(Boolean)
+                                .join(' ')}
+                            </div>
+                          )}
+                          {connection.remoteCard.email && (
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                              {connection.remoteCard.email}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                          Keine Daten
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Last Sync Column */}
+                    <td style={{ padding: '0.75rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      {connection.lastSyncAt
+                        ? new Date(connection.lastSyncAt).toLocaleString('de-DE', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })
+                        : '—'}
+                    </td>
+
+                    {/* Actions Column */}
+                    <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end' }}>
+                        <button
+                          className="btn btn-secondary btn-small"
+                          onClick={() => onEditPolicy(connection.id)}
+                          title="Freigabe bearbeiten"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                        >
+                          🔒
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-small"
+                          onClick={() => handleResync(connection.id)}
+                          disabled={connection.status === 'offline'}
+                          title="Resync"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                        >
+                          🔄
+                        </button>
+                        <button
+                          className="btn btn-danger btn-small"
+                          onClick={() => handleRemoveConnection(connection.id)}
+                          title="Entfernen"
+                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }}
+                        >
+                          ❌
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
