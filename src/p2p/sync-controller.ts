@@ -89,7 +89,6 @@ export class SyncController {
     };
 
     this.peerConnection.send(hello);
-    console.log(`🤝 HELLO gesendet an Session ${this.sessionId.substring(0, 8)}...`);
   }
 
   /**
@@ -121,17 +120,14 @@ export class SyncController {
    * Verarbeitet HELLO-Nachricht
    */
   private async handleHello(message: HelloMessage): Promise<void> {
-    console.log(`🤝 HELLO empfangen von Session ${message.peerId.substring(0, 8)}...`);
-
     this._remotePubKey = message.pubKey;
 
     // Berechne persistente Connection-ID (Fingerprint) vom Remote Public Key
     this._connectionId = await createFingerprint(message.pubKey);
-    console.log(`🔗 Connection-ID (Fingerprint): ${this._connectionId}`);
 
     // Schema-Kompatibilität prüfen
     if (message.schemaVersion !== '1.0.0') {
-      console.warn(`⚠️  Schema-Version nicht kompatibel: ${message.schemaVersion}`);
+      console.warn(`⚠️ Schema-Version nicht kompatibel: ${message.schemaVersion}`);
     }
 
     // Prüfe ob Connection mit diesem Fingerprint bereits existiert
@@ -139,7 +135,9 @@ export class SyncController {
     const existingConnection = doc.connections[this._connectionId];
 
     if (existingConnection) {
-      console.log(`✨ Bekannter Peer wiedererkannt! RemoteCard bleibt erhalten.`);
+      console.log(`✅ Peer ${this._connectionId} verbunden (bekannt)`);
+    } else {
+      console.log(`✅ Peer ${this._connectionId} verbunden (neu)`);
     }
 
     // Sende eigene HELLO, falls noch nicht geschehen
@@ -164,7 +162,6 @@ export class SyncController {
     // Falls Connection noch nicht existiert (eingehende Verbindung), erstelle eine
     if (!connection) {
       const defaultFields = this.getDefaultFields();
-      console.log(`⚠️  Connection ${connectionId} nicht gefunden, erstelle neue mit Freigabe:`, defaultFields);
 
       // Erstelle Connection mit Fingerprint als ID
       await store.addConnection(connectionId, this._remotePubKey || '', defaultFields);
@@ -185,7 +182,6 @@ export class SyncController {
     };
 
     this.peerConnection.send(policy);
-    console.log(`📋 POLICY gesendet an ${connectionId}:`, connection.allowedFields);
 
     // Nach Policy-Austausch: State-Hash senden (außer wenn skipStateHash = true)
     if (!skipStateHash) {
@@ -199,11 +195,6 @@ export class SyncController {
   private handlePolicy(message: PolicyMessage): void {
     const oldFields = this.remoteAllowedFields;
     this.remoteAllowedFields = message.allowedFields;
-
-    // Prüfe, ob sich die Policy geändert hat
-    const policyChanged = JSON.stringify(oldFields.sort()) !== JSON.stringify(message.allowedFields.sort());
-
-    console.log(`📋 POLICY empfangen von ${this.peerId}:`, message.allowedFields, policyChanged ? '(geändert)' : '(unverändert)');
 
     // Nach Policy-Empfang: State-Hash senden
     if (this.handshakeCompleted) {
@@ -223,7 +214,6 @@ export class SyncController {
     const connection = doc.connections[this.getConnectionId()];
 
     if (!connection) {
-      console.warn(`⚠️  Connection ${this.sessionId.substring(0,8)} nicht gefunden für STATE_HASH`);
       return;
     }
 
@@ -236,7 +226,6 @@ export class SyncController {
     };
 
     this.peerConnection.send(stateHash);
-    console.log(`#️⃣ STATE_HASH gesendet an ${this.peerId}: ${hash} (von remoteCard)`);
   }
 
   /**
@@ -249,7 +238,6 @@ export class SyncController {
     const connection = doc.connections[this.getConnectionId()];
 
     if (!connection) {
-      console.warn(`⚠️  Connection ${this.sessionId.substring(0,8)} nicht gefunden für STATE_HASH`);
       return;
     }
 
@@ -257,17 +245,13 @@ export class SyncController {
     const sharedFields = projectFields(doc.myCard, connection.allowedFields);
     const localHash = stableHash(sharedFields);
 
-    console.log(`#️⃣ STATE_HASH empfangen von ${this.peerId}: remote=${message.hash}, lokal=${localHash}`);
-
     this._lastRemoteHash = message.hash;
 
     // Vergleiche Hashes
     if (localHash !== message.hash) {
-      console.log(`⚠️  Hash-Diskrepanz → sende meine aktuellen Daten (PATCH)`);
       this.status = 'syncing';
       this.sendPatch();
     } else {
-      console.log(`✅ Synchron mit ${this.peerId}`);
       this.status = 'synced';
       this.updateConnectionStatus('online');
     }
@@ -281,7 +265,6 @@ export class SyncController {
     const connection = doc.connections[this.getConnectionId()];
 
     if (!connection) {
-      console.warn(`⚠️  Connection ${this.sessionId.substring(0,8)} nicht gefunden für PATCH`);
       return;
     }
 
@@ -293,20 +276,16 @@ export class SyncController {
     };
 
     this.peerConnection.send(patch);
-    console.log(`🔄 PATCH gesendet an ${this.peerId}`, sharedFields);
   }
 
   /**
    * Verarbeitet PATCH-Nachricht
    */
   private async handlePatch(message: PatchMessage): Promise<void> {
-    console.log(`🔄 PATCH empfangen von Session ${this.sessionId.substring(0,8)}`, message.fields);
-
     const doc = store.getDoc();
     const connection = doc.connections[this.getConnectionId()];
 
     if (!connection || !connection.storeRemoteCard) {
-      console.log(`⚠️  Speicherung für ${this.sessionId.substring(0,8)} deaktiviert`);
       // ACK senden, auch wenn nicht gespeichert
       const hash = stableHash(message.fields);
       const ack: AckMessage = {
@@ -314,7 +293,6 @@ export class SyncController {
         hash,
       };
       this.peerConnection.send(ack);
-      console.log(`✅ ACK gesendet an ${this.peerId}: ${hash} (nicht gespeichert)`);
       return;
     }
 
@@ -337,12 +315,11 @@ export class SyncController {
       };
 
       this.peerConnection.send(ack);
-      console.log(`✅ ACK gesendet an ${this.peerId}: ${hash}`);
 
       this.status = 'synced';
       this.updateConnectionStatus('online');
     } catch (error) {
-      console.error(`❌ Fehler beim Verarbeiten von PATCH von ${this.peerId}:`, error);
+      console.error(`❌ Fehler beim Verarbeiten von PATCH:`, error);
       // Sende trotzdem ACK, um Endlosschleife zu vermeiden
       const hash = stableHash(message.fields);
       const ack: AckMessage = {
@@ -350,7 +327,6 @@ export class SyncController {
         hash,
       };
       this.peerConnection.send(ack);
-      console.log(`✅ ACK gesendet an ${this.peerId}: ${hash} (mit Fehler)`);
     }
   }
 
@@ -358,8 +334,6 @@ export class SyncController {
    * Verarbeitet ACK-Nachricht
    */
   private handleAck(message: AckMessage): void {
-    console.log(`✅ ACK empfangen von Session ${this.sessionId.substring(0,8)}: ${message.hash}`);
-
     this._lastRemoteHash = message.hash;
     this.status = 'synced';
 
@@ -376,7 +350,6 @@ export class SyncController {
    */
   async resync(): Promise<void> {
     if (this.peerConnection.isConnected() && this.handshakeCompleted) {
-      console.log(`🔄 Resync für ${this.peerId}, sende POLICY + PATCH`);
       this.status = 'syncing';
       // Sende neue Policy (falls sie sich geändert hat)
       await this.sendPolicy(true); // skipStateHash = true
@@ -392,7 +365,6 @@ export class SyncController {
    */
   async updatePolicy(): Promise<void> {
     if (this.peerConnection.isConnected() && this.handshakeCompleted) {
-      console.log(`🔄 Policy-Update für ${this.peerId}, sende neue POLICY und PATCH`);
       this.status = 'syncing';
       // Sende neue Policy (skipStateHash = true)
       await this.sendPolicy(true);

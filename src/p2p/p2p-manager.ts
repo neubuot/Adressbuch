@@ -49,15 +49,11 @@ export class P2PManager {
     const keyPair = await getOrCreateKeyPair();
     this.localPubKey = keyPair.publicKey;
 
-    console.log(`🔑 Session-ID: ${this.localSessionId}`);
-    console.log(`🔑 Fingerprint: ${await createFingerprint(this.localPubKey)}`);
-
     // Signaling-Client verbinden (verwendet Session-ID)
     this.signalingClient = new SignalingClient(this.config.signalingUrl, this.localSessionId);
 
     this.signalingClient.on('peer-joined', (event) => {
       const remotePeerId = event.peerId as string;
-      console.log(`👤 Peer beigetreten: ${remotePeerId}`);
       this.initiateConnection(remotePeerId);
     });
 
@@ -75,32 +71,22 @@ export class P2PManager {
 
     await this.signalingClient.connect();
 
-    console.log('🚀 Signaling-Client verbunden, starte Auto-Reconnect...');
-
     // Auto-Reconnect zu bekannten Peers
     await this.autoReconnect();
-
-    console.log('✅ P2PManager vollständig initialisiert');
   }
 
   /**
    * Versucht automatisch zu allen bekannten Peers zu reconnecten
    */
   private async autoReconnect(): Promise<void> {
-    console.log('🔍 Auto-Reconnect: Prüfe Store...');
-
     const doc = store.getDoc();
-    console.log('📚 Store geladen, Connections:', doc.connections);
-
     const connections = Object.values(doc.connections);
-    console.log(`📊 Anzahl Connections im Store: ${connections.length}`);
 
     if (connections.length === 0) {
-      console.log('📭 Keine bekannten Connections für Auto-Reconnect');
       return;
     }
 
-    console.log(`🔄 Auto-Reconnect: Versuche zu ${connections.length} bekannten Peer(s) zu verbinden...`);
+    console.log(`🔄 Auto-Reconnect: Verbinde zu ${connections.length} bekannten Peer(s)...`);
 
     const myFingerprint = await createFingerprint(this.localPubKey);
 
@@ -108,7 +94,6 @@ export class P2PManager {
       try {
         // Berechne persistenten Room-Code aus beiden Fingerprints
         const roomCode = await generatePersistentRoomCode(myFingerprint, connection.id);
-        console.log(`🔗 Auto-Reconnect zu ${connection.id}: Trete persistentem Room ${roomCode} bei`);
 
         // Tritt dem persistenten Room bei
         this.joinRoom(roomCode);
@@ -131,8 +116,6 @@ export class P2PManager {
    * Erstellt eine ausgehende Verbindung zu einem Peer
    */
   private initiateConnection(remotePeerId: string): void {
-    console.log(`🔗 Initiiere Verbindung zu ${remotePeerId}`);
-
     const peerConnection = new PeerConnection(remotePeerId, true);
 
     peerConnection.on('signal', (event) => {
@@ -157,8 +140,6 @@ export class P2PManager {
 
     if (!peerConnection) {
       // Eingehende Verbindung: erstelle neue Peer-Verbindung
-      console.log(`📞 Eingehende Verbindung von ${fromPeerId}`);
-
       peerConnection = new PeerConnection(fromPeerId, false);
 
       peerConnection.on('signal', (event) => {
@@ -183,8 +164,6 @@ export class P2PManager {
    * Richtet den Sync-Controller für eine Verbindung ein
    */
   private setupSyncController(peerId: string, peerConnection: PeerConnection): void {
-    console.log(`✅ Verbindung zu ${peerId} hergestellt, richte Sync ein`);
-
     // Verbindung ist bereits hergestellt, daher alreadyConnected = true
     const syncController = new SyncController(
       peerId,

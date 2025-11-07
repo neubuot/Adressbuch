@@ -39,8 +39,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await manager.init();
 
       setIsInitialized(true);
-
-      console.log('✅ App initialisiert');
     };
 
     init().catch(console.error);

@@ -62,7 +62,6 @@ export class PeerConnection {
     });
 
     this.peer.on('connect', () => {
-      console.log(`✅ WebRTC-Verbindung zu ${this.peerId} hergestellt`);
       this.connected = true;
       this.emit('connect', { type: 'connect' });
     });
@@ -77,47 +76,14 @@ export class PeerConnection {
     });
 
     this.peer.on('close', () => {
-      console.log(`❌ WebRTC-Verbindung zu ${this.peerId} geschlossen`);
       this.connected = false;
       this.emit('close', { type: 'close' });
     });
 
     this.peer.on('error', (error: Error) => {
-      console.error(`WebRTC-Fehler mit ${this.peerId}:`, error);
+      console.error(`WebRTC-Fehler:`, error.message);
       this.emit('error', { type: 'error', error });
     });
-
-    // Erweiterte ICE-Diagnose
-    if (this.peer._pc) {
-      this.peer._pc.addEventListener('iceconnectionstatechange', () => {
-        console.log(`🧊 ICE Connection State (${this.peerId}):`, this.peer?._pc?.iceConnectionState);
-      });
-
-      this.peer._pc.addEventListener('icegatheringstatechange', () => {
-        console.log(`📡 ICE Gathering State (${this.peerId}):`, this.peer?._pc?.iceGatheringState);
-      });
-
-      this.peer._pc.addEventListener('icecandidateerror', (event: any) => {
-        console.warn(`⚠️ ICE Candidate Error (${this.peerId}):`, {
-          errorCode: event.errorCode,
-          errorText: event.errorText,
-          url: event.url,
-          address: event.address,
-          port: event.port,
-        });
-      });
-
-      this.peer._pc.addEventListener('icecandidate', (event: RTCPeerConnectionIceEvent) => {
-        if (event.candidate) {
-          console.log(`🎯 ICE Candidate (${this.peerId}):`, {
-            type: event.candidate.type,
-            protocol: event.candidate.protocol,
-            address: event.candidate.address,
-            port: event.candidate.port,
-          });
-        }
-      });
-    }
   }
 
   /**
