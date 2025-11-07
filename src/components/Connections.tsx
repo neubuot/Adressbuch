@@ -34,6 +34,8 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
     if (joinCode.trim().length >= 4) {
       const manager = getP2PManager();
       if (manager) {
+        // Setze Standard-Freigabe bevor wir beitreten
+        manager.setDefaultAllowedFields(newConnectionFields);
         manager.joinRoom(joinCode.trim().toUpperCase());
         setJoinCode('');
         setShowJoin(false);

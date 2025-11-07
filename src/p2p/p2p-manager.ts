@@ -19,10 +19,26 @@ export class P2PManager {
   private localPubKey: string = '';
   private syncControllers: Map<string, SyncController> = new Map();
   private pendingConnections: Map<string, PeerConnection> = new Map();
+  private defaultAllowedFields: string[] = []; // Felder für neue Connections
 
   constructor(private config: P2PManagerConfig) {
     // Session-ID ist zufällig (pro Tab/Session)
     this.localSessionId = generatePeerId();
+  }
+
+  /**
+   * Setzt die Standard-Freigabefelder für neue Connections
+   */
+  setDefaultAllowedFields(fields: string[]): void {
+    this.defaultAllowedFields = fields;
+    console.log(`📋 Standard-Freigabe gesetzt:`, fields);
+  }
+
+  /**
+   * Gibt die Standard-Freigabefelder zurück
+   */
+  getDefaultAllowedFields(): string[] {
+    return this.defaultAllowedFields;
   }
 
   /**
@@ -128,7 +144,13 @@ export class P2PManager {
     console.log(`✅ Verbindung zu ${peerId} hergestellt, richte Sync ein`);
 
     // Verbindung ist bereits hergestellt, daher alreadyConnected = true
-    const syncController = new SyncController(peerId, peerConnection, this.localPubKey, true);
+    const syncController = new SyncController(
+      peerId,
+      peerConnection,
+      this.localPubKey,
+      () => this.getDefaultAllowedFields(), // Callback
+      true
+    );
 
     this.syncControllers.set(peerId, syncController);
     this.pendingConnections.delete(peerId);

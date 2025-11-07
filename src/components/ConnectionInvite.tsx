@@ -37,11 +37,21 @@ export const ConnectionInvite: React.FC<ConnectionInviteProps> = ({
     if (!hasJoined) {
       const manager = getP2PManager();
       if (manager) {
+        // Setze Standard-Freigabe für neue Connections
+        manager.setDefaultAllowedFields(fields);
         manager.joinRoom(roomCode);
         setHasJoined(true);
       }
     }
-  }, [roomCode, hasJoined]);
+  }, [roomCode, hasJoined, fields]);
+
+  // Update defaultAllowedFields wenn Felder geändert werden
+  useEffect(() => {
+    const manager = getP2PManager();
+    if (manager) {
+      manager.setDefaultAllowedFields(fields);
+    }
+  }, [fields]);
 
   const handleFieldToggle = (field: string) => {
     if (fields.includes(field)) {

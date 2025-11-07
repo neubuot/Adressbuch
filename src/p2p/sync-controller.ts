@@ -31,6 +31,7 @@ export class SyncController {
     private sessionId: string, // Session-ID (temporär, für WebRTC)
     private peerConnection: PeerConnection,
     private localPubKey: string,
+    private getDefaultFields: () => string[], // Callback für Standard-Freigabe
     alreadyConnected = false
   ) {
     this.setupListeners();
@@ -162,10 +163,11 @@ export class SyncController {
 
     // Falls Connection noch nicht existiert (eingehende Verbindung), erstelle eine
     if (!connection) {
-      console.log(`⚠️  Connection ${connectionId} nicht gefunden, erstelle neue mit leerer Policy`);
+      const defaultFields = this.getDefaultFields();
+      console.log(`⚠️  Connection ${connectionId} nicht gefunden, erstelle neue mit Freigabe:`, defaultFields);
 
-      // Erstelle Connection mit Fingerprint als ID (privacy by default)
-      await store.addConnection(connectionId, this._remotePubKey || '', []);
+      // Erstelle Connection mit Fingerprint als ID
+      await store.addConnection(connectionId, this._remotePubKey || '', defaultFields);
 
       // Lade neu
       const updatedDoc = store.getDoc();
