@@ -26,8 +26,15 @@ export const useAppContext = () => {
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [appState, setAppState] = useState<AppState>(store.getDoc());
   const [isInitialized, setIsInitialized] = useState(false);
+  const initStartedRef = React.useRef(false);
 
   useEffect(() => {
+    // Guard: Verhindere doppelte Initialisierung in React StrictMode
+    if (initStartedRef.current) {
+      return;
+    }
+    initStartedRef.current = true;
+
     const init = async () => {
       // Store laden
       await store.load();
@@ -50,10 +57,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return () => {
       unsubscribe();
+      // Hinweis: destroy() wird nur beim echten Unmount aufgerufen,
+      // nicht bei React StrictMode re-mounts (da initStartedRef.current true bleibt)
       const manager = getP2PManager();
       if (manager) {
         manager.destroy();
       }
+      initStartedRef.current = false;
     };
   }, []);
 

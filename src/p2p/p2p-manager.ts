@@ -20,6 +20,8 @@ export class P2PManager {
   private syncControllers: Map<string, SyncController> = new Map();
   private pendingConnections: Map<string, PeerConnection> = new Map();
   private defaultAllowedFields: string[] = []; // Felder für neue Connections
+  private isInitialized = false;
+  private isInitializing = false;
 
   constructor(private config: P2PManagerConfig) {
     // Session-ID ist zufällig (pro Tab/Session)
@@ -45,34 +47,53 @@ export class P2PManager {
    * Initialisiert den P2P-Manager
    */
   async init(): Promise<void> {
-    // Keypair laden/erstellen
-    const keyPair = await getOrCreateKeyPair();
-    this.localPubKey = keyPair.publicKey;
+    // Guard: Verhindere doppelte Initialisierung
+    if (this.isInitialized) {
+      console.log('⚠️ P2PManager bereits initialisiert, überspringe');
+      return;
+    }
 
-    // Signaling-Client verbinden (verwendet Session-ID)
-    this.signalingClient = new SignalingClient(this.config.signalingUrl, this.localSessionId);
+    if (this.isInitializing) {
+      console.log('⚠️ P2PManager wird bereits initialisiert, überspringe');
+      return;
+    }
 
-    this.signalingClient.on('peer-joined', (event) => {
-      const remotePeerId = event.peerId as string;
-      this.initiateConnection(remotePeerId);
-    });
+    this.isInitializing = true;
 
-    this.signalingClient.on('signal', (event) => {
-      const signal = event.signal as SignalData;
-      const fromPeerId = event.fromPeerId as string;
-      this.handleSignal(fromPeerId, signal);
-    });
+    try {
+      // Keypair laden/erstellen
+      const keyPair = await getOrCreateKeyPair();
+      this.localPubKey = keyPair.publicKey;
 
-    this.signalingClient.on('peer-left', (event) => {
-      const peerId = event.peerId as string;
-      console.log(`👋 Peer verlassen: ${peerId}`);
-      this.removeConnection(peerId);
-    });
+      // Signaling-Client verbinden (verwendet Session-ID)
+      this.signalingClient = new SignalingClient(this.config.signalingUrl, this.localSessionId);
 
-    await this.signalingClient.connect();
+      this.signalingClient.on('peer-joined', (event) => {
+        const remotePeerId = event.peerId as string;
+        this.initiateConnection(remotePeerId);
+      });
 
-    // Auto-Reconnect zu bekannten Peers
-    await this.autoReconnect();
+      this.signalingClient.on('signal', (event) => {
+        const signal = event.signal as SignalData;
+        const fromPeerId = event.fromPeerId as string;
+        this.handleSignal(fromPeerId, signal);
+      });
+
+      this.signalingClient.on('peer-left', (event) => {
+        const peerId = event.peerId as string;
+        console.log(`👋 Peer verlassen: ${peerId}`);
+        this.removeConnection(peerId);
+      });
+
+      await this.signalingClient.connect();
+
+      // Auto-Reconnect zu bekannten Peers
+      await this.autoReconnect();
+
+      this.isInitialized = true;
+    } finally {
+      this.isInitializing = false;
+    }
   }
 
   /**
@@ -116,6 +137,11 @@ export class P2PManager {
    * Erstellt eine ausgehende Verbindung zu einem Peer
    */
   private initiateConnection(remotePeerId: string): void {
+    // Guard: Verhindere doppelte Verbindungen zur gleichen Session-ID
+    if (this.pendingConnections.has(remotePeerId) || this.syncControllers.has(remotePeerId)) {
+      return; // Bereits verbunden oder Verbindung läuft
+    }
+
     const peerConnection = new PeerConnection(remotePeerId, true);
 
     peerConnection.on('signal', (event) => {
@@ -139,6 +165,11 @@ export class P2PManager {
     let peerConnection = this.pendingConnections.get(fromPeerId);
 
     if (!peerConnection) {
+      // Guard: Verhindere neue Verbindung wenn bereits etabliert
+      if (this.syncControllers.has(fromPeerId)) {
+        return; // Bereits verbunden
+      }
+
       // Eingehende Verbindung: erstelle neue Peer-Verbindung
       peerConnection = new PeerConnection(fromPeerId, false);
 
@@ -271,6 +302,10 @@ export class P2PManager {
       this.signalingClient.disconnect();
       this.signalingClient = null;
     }
+
+    // Reset flags
+    this.isInitialized = false;
+    this.isInitializing = false;
   }
 }
 
@@ -278,6 +313,13 @@ export class P2PManager {
 let globalManager: P2PManager | null = null;
 
 export function initP2PManager(config: P2PManagerConfig): P2PManager {
+  // Wiederverwende existierenden Manager falls möglich
+  if (globalManager && (globalManager as any).isInitialized) {
+    console.log('♻️ Wiederverwende existierenden P2PManager');
+    return globalManager;
+  }
+
+  // Destroy alter Manager falls vorhanden
   if (globalManager) {
     globalManager.destroy();
   }
