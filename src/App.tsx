@@ -3,7 +3,7 @@
  */
 
 import { useState } from 'react';
-import { AppProvider } from './context/AppContext';
+import { AppProvider, useAppContext } from './context/AppContext';
 import { Dashboard } from './components/Dashboard';
 import { MyCard } from './components/MyCard';
 import { Connections } from './components/Connections';
@@ -13,8 +13,15 @@ import './App.css';
 type View = 'dashboard' | 'mycard' | 'connections' | 'policy';
 
 function AppContent() {
+  const { appState } = useAppContext();
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
+
+  // Erstelle dynamischen Titel
+  const firstName = appState.myCard.firstName || '';
+  const lastName = appState.myCard.lastName || '';
+  const nameExtension = (firstName || lastName) ? ` von ${firstName} ${lastName}`.trim() : '';
+  const appTitle = `P2P Adressbuch${nameExtension}`;
 
   const renderView = () => {
     switch (currentView) {
@@ -47,7 +54,7 @@ function AppContent() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>P2P Adressbuch</h1>
+        <h1>{appTitle}</h1>
         <nav>
           <button
             onClick={() => setCurrentView('dashboard')}
