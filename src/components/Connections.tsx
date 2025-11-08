@@ -8,6 +8,7 @@ import { store } from '../store/automerge-store';
 import { getP2PManager } from '../p2p/p2p-manager';
 import { ConnectionInvite } from './ConnectionInvite';
 import { TagManager } from './TagManager';
+import { ConnectionsExport } from './ConnectionsExport';
 
 interface ConnectionsProps {
   onBack: () => void;
@@ -33,6 +34,7 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
   const [showTagManager, setShowTagManager] = useState(false);
   const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null);
   const [editingTags, setEditingTags] = useState<string | null>(null);
+  const [showExport, setShowExport] = useState(false);
 
   const connections = Object.values(appState.connections);
   const tags = Object.values(appState.tags);
@@ -154,6 +156,11 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
       return 0;
     });
 
+  // Zeige Export-Ansicht
+  if (showExport) {
+    return <ConnectionsExport onClose={() => setShowExport(false)} />;
+  }
+
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '1.5rem' }}>
@@ -173,6 +180,9 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
           </button>
           <button className="btn btn-secondary" onClick={() => setShowTagManager(true)}>
             🏷️ Tags verwalten
+          </button>
+          <button className="btn btn-secondary" onClick={() => setShowExport(true)}>
+            💾 Verbindungen exportieren
           </button>
         </div>
 
