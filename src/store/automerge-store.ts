@@ -154,6 +154,7 @@ export class AutomergeStore {
         allowedFields,
         storeRemoteCard: true,
         status: 'offline',
+        createdAt: new Date().toISOString(),
       };
     });
   }

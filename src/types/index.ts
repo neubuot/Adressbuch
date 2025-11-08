@@ -34,6 +34,7 @@ export interface Connection {
   peerPubKey: string; // base64
   allowedFields: string[]; // Whitelist pro Verbindung
   storeRemoteCard: boolean; // ob fremde Karte lokal persistiert wird
+  createdAt?: string; // Zeitpunkt der ersten Anlage
   lastSyncAt?: string;
   status: 'online' | 'offline' | 'syncing';
   remoteCard?: Partial<AddressCard>; // gespeicherte fremde Karte

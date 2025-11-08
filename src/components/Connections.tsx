@@ -394,6 +394,12 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
                   Freigegebene Felder: {connection.allowedFields.length === 0 ? 'Keine' : connection.allowedFields.join(', ')}
                 </div>
 
+                {connection.createdAt && (
+                  <div style={{ fontSize: '0.75rem', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>
+                    Erstellt am: {new Date(connection.createdAt).toLocaleString('de-DE')}
+                  </div>
+                )}
+
                 {connection.lastSyncAt && (
                   <div style={{ fontSize: '0.75rem', marginBottom: '0.5rem', color: 'var(--text-secondary)' }}>
                     Letzte Synchronisation: {new Date(connection.lastSyncAt).toLocaleString('de-DE')}
