@@ -23,8 +23,6 @@ export class SyncController {
   private status: SyncStatus = 'idle';
   private _remotePubKey: string | null = null;
   private _connectionId: string | null = null; // Fingerprint (persistent)
-  private remoteAllowedFields: string[] = [];
-  private _lastRemoteHash: string | null = null;
   private handshakeCompleted = false;
 
   constructor(
@@ -32,6 +30,7 @@ export class SyncController {
     private peerConnection: PeerConnection,
     private localPubKey: string,
     private getDefaultFields: () => string[], // Callback für Standard-Freigabe
+    private onConnectionIdKnown: (connectionId: string) => void, // Callback wenn Fingerprint bekannt
     alreadyConnected = false
   ) {
     this.setupListeners();
@@ -125,6 +124,9 @@ export class SyncController {
     // Berechne persistente Connection-ID (Fingerprint) vom Remote Public Key
     this._connectionId = await createFingerprint(message.pubKey);
 
+    // Benachrichtige P2PManager über die Connection-ID
+    this.onConnectionIdKnown(this._connectionId);
+
     // Schema-Kompatibilität prüfen
     if (message.schemaVersion !== '1.0.0') {
       console.warn(`⚠️ Schema-Version nicht kompatibel: ${message.schemaVersion}`);
@@ -192,10 +194,7 @@ export class SyncController {
   /**
    * Verarbeitet POLICY-Nachricht
    */
-  private handlePolicy(message: PolicyMessage): void {
-    const oldFields = this.remoteAllowedFields;
-    this.remoteAllowedFields = message.allowedFields;
-
+  private handlePolicy(_message: PolicyMessage): void {
     // Nach Policy-Empfang: State-Hash senden
     if (this.handshakeCompleted) {
       // Policy hat sich geändert → sende STATE_HASH, um Update zu triggern
@@ -244,8 +243,6 @@ export class SyncController {
     // Hash von dem, was ICH sende (meine allowedFields)
     const sharedFields = projectFields(doc.myCard, connection.allowedFields);
     const localHash = stableHash(sharedFields);
-
-    this._lastRemoteHash = message.hash;
 
     // Vergleiche Hashes
     if (localHash !== message.hash) {
@@ -333,8 +330,7 @@ export class SyncController {
   /**
    * Verarbeitet ACK-Nachricht
    */
-  private handleAck(message: AckMessage): void {
-    this._lastRemoteHash = message.hash;
+  private handleAck(_message: AckMessage): void {
     this.status = 'synced';
 
     store.updateConnection(this.getConnectionId(), {

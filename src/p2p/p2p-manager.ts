@@ -17,7 +17,8 @@ export class P2PManager {
   private signalingClient: SignalingClient | null = null;
   private localSessionId: string;
   private localPubKey: string = '';
-  private syncControllers: Map<string, SyncController> = new Map();
+  private syncControllers: Map<string, SyncController> = new Map(); // Session-ID → SyncController
+  private connectionIdToController: Map<string, SyncController> = new Map(); // Connection-ID (Fingerprint) → SyncController
   private pendingConnections: Map<string, PeerConnection> = new Map();
   private defaultAllowedFields: string[] = []; // Felder für neue Connections
   private isInitialized = false;
@@ -201,6 +202,7 @@ export class P2PManager {
       peerConnection,
       this.localPubKey,
       () => this.getDefaultAllowedFields(), // Callback
+      (connectionId: string) => this.registerConnectionId(peerId, connectionId), // Callback für Connection-ID
       true
     );
 
@@ -209,6 +211,18 @@ export class P2PManager {
 
     // HINWEIS: Store-Update erfolgt automatisch im SyncController nach HELLO-Austausch,
     // wenn die echte Connection-ID (Fingerprint) bekannt ist
+  }
+
+  /**
+   * Registriert die Connection-ID für einen SyncController
+   * Wird vom SyncController aufgerufen, sobald der Fingerprint bekannt ist
+   */
+  private registerConnectionId(sessionId: string, connectionId: string): void {
+    const syncController = this.syncControllers.get(sessionId);
+    if (syncController) {
+      this.connectionIdToController.set(connectionId, syncController);
+      console.log(`🔗 Connection-ID ${connectionId} registriert für Session ${sessionId}`);
+    }
   }
 
   /**
@@ -245,10 +259,20 @@ export class P2PManager {
   /**
    * Triggert Resync für eine Verbindung
    */
-  async resyncConnection(peerId: string): Promise<void> {
-    const syncController = this.syncControllers.get(peerId);
+  async resyncConnection(connectionId: string): Promise<void> {
+    // Suche zuerst mit Connection-ID (Fingerprint)
+    let syncController = this.connectionIdToController.get(connectionId);
+
+    // Fallback: Suche mit Session-ID (für Abwärtskompatibilität)
+    if (!syncController) {
+      syncController = this.syncControllers.get(connectionId);
+    }
+
     if (syncController) {
+      console.log(`🔄 Resync für Connection ${connectionId}`);
       await syncController.resync();
+    } else {
+      console.warn(`⚠️ Keine aktive Verbindung für ${connectionId} gefunden`);
     }
   }
 
@@ -291,6 +315,7 @@ export class P2PManager {
       syncController.destroy();
     }
     this.syncControllers.clear();
+    this.connectionIdToController.clear();
 
     for (const peerConnection of this.pendingConnections.values()) {
       peerConnection.destroy();

@@ -111,7 +111,7 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
 
       // Trete dem Room bei (für automatische Verbindung)
       manager.setDefaultAllowedFields(selectedFields);
-      manager.createRoom(code);
+      manager.joinRoom(code);
     } catch (error) {
       console.error('Fehler beim Generieren des QR-Codes:', error);
     }
