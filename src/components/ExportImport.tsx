@@ -2,7 +2,7 @@
  * ExportImport-Komponente: Export/Import von Visitenkarten
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { store } from '../store/automerge-store';
 import { getP2PManager } from '../p2p/p2p-manager';
@@ -32,7 +32,6 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
   ]);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [roomCode, setRoomCode] = useState<string>('');
-  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const availableFields = [
     { key: 'firstName', label: 'Vorname' },
@@ -63,9 +62,17 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
 
   const generateQRCode = async () => {
     const manager = getP2PManager();
-    if (!manager) return;
+    if (!manager) {
+      console.error('P2P Manager nicht verfügbar');
+      return;
+    }
 
-    const pubKey = await (manager as any).cryptoManager.exportPublicKey();
+    const pubKey = manager.getLocalPubKey();
+    if (!pubKey) {
+      console.error('Public Key nicht verfügbar - Manager nicht initialisiert?');
+      return;
+    }
+
     const code = roomCode || generateRoomCode();
 
     // Erstelle Export-Daten
@@ -88,6 +95,8 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
 
     // Generiere QR-Code
     const dataString = JSON.stringify(exportData);
+    console.log('Generiere QR-Code mit Daten:', exportData);
+
     try {
       const url = await QRCode.toDataURL(dataString, {
         width: 300,
@@ -98,6 +107,7 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
         },
       });
       setQrCodeUrl(url);
+      console.log('QR-Code erfolgreich generiert');
 
       // Trete dem Room bei (für automatische Verbindung)
       manager.setDefaultAllowedFields(selectedFields);
@@ -153,12 +163,6 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
       alert('Fehler beim Importieren der Datei');
     }
   };
-
-  useEffect(() => {
-    if (activeTab === 'export' && selectedFields.length > 0) {
-      generateQRCode();
-    }
-  }, [selectedFields, activeTab]);
 
   return (
     <div
@@ -222,8 +226,8 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
 
             {/* Feld-Auswahl */}
             <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: 'var(--background)', borderRadius: '0.375rem' }}>
-              <h4 style={{ marginBottom: '0.75rem', fontSize: '1rem' }}>Welche Felder möchtest du teilen?</h4>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '0.5rem' }}>
+              <h4 style={{ marginBottom: '0.75rem', fontSize: '1rem' }}>1. Welche Felder möchtest du teilen?</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
                 {availableFields.map((field) => (
                   <label
                     key={field.key}
@@ -247,19 +251,32 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
                   </label>
                 ))}
               </div>
+              <button
+                className="btn btn-primary"
+                onClick={generateQRCode}
+                disabled={selectedFields.length === 0}
+              >
+                🔲 QR-Code generieren
+              </button>
             </div>
 
             {/* QR-Code */}
             {qrCodeUrl && (
               <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: 'var(--background)', borderRadius: '0.375rem', textAlign: 'center' }}>
-                <h4 style={{ marginBottom: '1rem', fontSize: '1rem' }}>QR-Code zum Scannen</h4>
-                <img src={qrCodeUrl} alt="QR-Code" style={{ maxWidth: '300px', width: '100%' }} />
+                <h4 style={{ marginBottom: '1rem', fontSize: '1rem' }}>2. QR-Code zum Teilen</h4>
+                <img src={qrCodeUrl} alt="QR-Code" style={{ maxWidth: '300px', width: '100%', border: '1px solid var(--border)', borderRadius: '0.375rem', padding: '0.5rem' }} />
                 <div style={{ marginTop: '1rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                  <strong>Raum-Code:</strong> {roomCode}
+                  <strong>Raum-Code:</strong> <code style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--primary)' }}>{roomCode}</code>
                   <br />
-                  <span style={{ fontSize: '0.75rem' }}>
-                    Andere können diesen Code auch manuell eingeben
-                  </span>
+                  <div style={{ marginTop: '0.75rem', padding: '0.75rem', backgroundColor: '#fef3c7', borderRadius: '0.25rem', textAlign: 'left' }}>
+                    <strong>💡 So verbindest du dich:</strong>
+                    <ol style={{ marginTop: '0.5rem', marginLeft: '1.25rem', fontSize: '0.875rem' }}>
+                      <li>Gehe in einem <strong>zweiten Tab/Browser</strong> zu "Verbindungen"</li>
+                      <li>Klicke auf <strong>"📥 Mit Code verbinden"</strong></li>
+                      <li>Gib den Raum-Code <code>{roomCode}</code> ein</li>
+                      <li>Die Verbindung wird automatisch hergestellt!</li>
+                    </ol>
+                  </div>
                 </div>
                 <button
                   className="btn btn-secondary btn-small"
@@ -319,8 +336,6 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
             </div>
           </div>
         )}
-
-        <canvas ref={canvasRef} style={{ display: 'none' }} />
       </div>
     </div>
   );
