@@ -2,8 +2,10 @@
  * Dashboard-Komponente
  */
 
+import { useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { getP2PManager } from '../p2p/p2p-manager';
+import { ExportImport } from './ExportImport';
 
 interface DashboardProps {
   onNavigate: (view: 'mycard' | 'connections') => void;
@@ -11,6 +13,7 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const { appState, isInitialized } = useAppContext();
+  const [showExportImport, setShowExportImport] = useState(false);
 
   if (!isInitialized) {
     return <div className="loading">Laden...</div>;
@@ -30,7 +33,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     <div>
       <h2 style={{ marginBottom: '1.5rem' }}>Dashboard</h2>
 
-      <div className="grid grid-2" style={{ marginBottom: '2rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
         <div className="card">
           <h3 style={{ marginBottom: '0.5rem' }}>Mein Profil</h3>
           {isProfileComplete ? (
@@ -68,6 +71,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             Verwalten
           </button>
         </div>
+
+        <div className="card">
+          <h3 style={{ marginBottom: '0.5rem' }}>Teilen & Backup</h3>
+          <p style={{ marginBottom: '1rem', color: 'var(--text-secondary)' }}>
+            Visitenkarte per QR-Code teilen oder als JSON exportieren
+          </p>
+          <button
+            className="btn btn-primary btn-small"
+            onClick={() => setShowExportImport(true)}
+          >
+            📤 Export / Import
+          </button>
+        </div>
       </div>
 
       <div className="card">
@@ -99,6 +115,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           </ol>
         </div>
       )}
+
+      {showExportImport && <ExportImport onClose={() => setShowExportImport(false)} />}
     </div>
   );
 };
