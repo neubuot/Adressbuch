@@ -1,0 +1,132 @@
+.container {
+  width: 100%;
+}
+
+.loading,
+.error,
+.empty {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+}
+
+.error {
+  color: #d32f2f;
+}
+
+.searchBox {
+  margin-bottom: 1.5rem;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 1rem;
+  transition: border-color 0.2s;
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.contactCard {
+  background: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  transition: box-shadow 0.2s;
+}
+
+.contactCard:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.contactHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
+.contactHeader h3 {
+  margin: 0;
+  color: #333;
+  font-size: 1.25rem;
+}
+
+.deleteButton {
+  background: #ff5252;
+  color: white;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.2s;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.deleteButton:hover {
+  background: #d32f2f;
+}
+
+.company {
+  font-weight: 600;
+  color: #667eea;
+  margin: 0.25rem 0;
+}
+
+.position {
+  color: #666;
+  font-size: 0.9rem;
+  margin: 0.25rem 0 1rem 0;
+}
+
+.contactInfo {
+  margin-top: 1rem;
+}
+
+.infoRow {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  align-items: flex-start;
+}
+
+.label {
+  flex-shrink: 0;
+  font-size: 1.1rem;
+}
+
+.infoRow a {
+  color: #667eea;
+  text-decoration: none;
+}
+
+.infoRow a:hover {
+  text-decoration: underline;
+}
+
+.notes {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: #666;
+}
