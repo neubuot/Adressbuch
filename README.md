@@ -1,194 +1,360 @@
-# 📒 Dezentrales Adressbuch - Progressive Web App
+# P2P Adressbuch - Dezentrale Kontaktverwaltung
 
-Eine moderne, dezentrale Adressbuch-Anwendung als Progressive Web App (PWA) mit integriertem P2P-Messaging-System.
+Eine **lokal-first**, **peer-to-peer fähige** Adressbuch-Web-App, mit der zwei oder mehr Nutzer ihre eigenen Adresskarten gezielt miteinander teilen können. Die App verwendet WebRTC für direkte Peer-to-Peer-Verbindungen, Automerge für konfliktfreie Datensynchronisation und speichert alle Daten lokal im Browser (IndexedDB).
 
-## ✨ Features
+## Features (Phase 1)
 
-### 📇 Kontaktverwaltung
-- Kontakte hinzufügen, bearbeiten und löschen
-- Speicherung von Name, E-Mail, Telefon und Adresse
-- Übersichtliche Darstellung aller Kontakte
-- Lokale Datenspeicherung (LocalStorage)
+✅ **Privacy by Default**: Keine Felder werden standardmäßig geteilt
+✅ **Feldgenaue Freigabe**: Wähle pro Verbindung aus, welche Felder sichtbar sind
+✅ **Offline-fähig**: Lokale Speicherung mit IndexedDB
+✅ **Konfliktfreie Synchronisation**: Automerge CRDT für robuste Datensynchronisation
+✅ **Peer-to-Peer**: Direkte Verbindung über WebRTC, keine Cloud-Datenhaltung
+✅ **QR-Code-Verbindung**: Einfache Verbindung über QR-Code oder 8-stelligen Code
 
-### 💬 P2P Messaging
-- Direktnachrichten zwischen Kontakten
-- **Maximale Nachrichtenlänge: 210 Zeichen**
-- Zeichenzähler mit visueller Warnung
-- Nachrichtenfilter (Alle / Gesendet / Empfangen)
-- Zeitstempel für jede Nachricht
-- Dezentraler Ansatz (erweiterbar mit WebRTC)
-
-### 📱 Progressive Web App
-- **Offline-Funktionalität** durch Service Worker
-- **Installierbar** auf allen Geräten (Desktop & Mobile)
-- Responsive Design für alle Bildschirmgrößen
-- Online/Offline-Statusanzeige
-- Caching für schnelle Performance
-
-## 🚀 Installation & Nutzung
-
-### Lokale Entwicklung
-
-1. **Repository klonen:**
-   ```bash
-   git clone https://github.com/neubuot/Adressbuch.git
-   cd Adressbuch
-   ```
-
-2. **Lokalen Server starten:**
-
-   Mit Python 3:
-   ```bash
-   python3 -m http.server 8000
-   ```
-
-   Oder mit Node.js (npx):
-   ```bash
-   npx serve
-   ```
-
-3. **App öffnen:**
-   ```
-   http://localhost:8000
-   ```
-
-### Als PWA installieren
-
-1. App im Browser öffnen (Chrome, Edge, Safari, Firefox)
-2. Auf den **"App installieren"**-Button klicken
-3. Oder über Browser-Menü: "App installieren" / "Zum Startbildschirm"
-4. App wie eine native Anwendung nutzen
-
-## 📖 Verwendung
-
-### Kontakte verwalten
-
-1. **Kontakt hinzufügen:**
-   - Name und E-Mail eingeben (Pflichtfelder)
-   - Optional: Telefon und Adresse
-   - "Kontakt hinzufügen" klicken
-
-2. **Kontakt löschen:**
-   - "🗑️ Löschen" bei gewünschtem Kontakt klicken
-   - Bestätigung mit "OK"
-
-### Nachrichten senden
-
-1. **Zum Messages-Tab wechseln**
-2. **Empfänger auswählen** aus Dropdown
-3. **Nachricht eingeben** (max. 210 Zeichen)
-   - Zeichenzähler zeigt verbleibende Zeichen
-   - Wird rot bei >200 Zeichen
-4. **"Senden" klicken**
-
-### Nachrichten filtern
-
-- **Alle:** Zeigt alle Nachrichten
-- **Gesendet:** Nur versendete Nachrichten
-- **Empfangen:** Nur empfangene Nachrichten
-
-## 🔧 Technische Details
-
-### Technologie-Stack
-- **HTML5** - Struktur
-- **CSS3** - Styling mit CSS Custom Properties
-- **Vanilla JavaScript** - Keine Frameworks/Bibliotheken
-- **Service Worker API** - Offline-Funktionalität
-- **LocalStorage API** - Datenspeicherung
-- **Web App Manifest** - PWA-Installation
-
-### Datenspeicherung
-- Alle Daten werden lokal im Browser gespeichert (LocalStorage)
-- Keine Server-Kommunikation erforderlich
-- Daten bleiben im Browser des Nutzers
-
-### P2P-Erweiterung
-Die aktuelle Version nutzt LocalStorage. Für echtes P2P können folgende Technologien integriert werden:
-- **WebRTC** für direkte Browser-zu-Browser-Kommunikation
-- **IPFS** für dezentrale Datenspeicherung
-- **WebSockets** für Echtzeit-Synchronisation
-
-### Export/Import (für fortgeschrittene Nutzer)
-
-Daten können in der Browser-Konsole exportiert/importiert werden:
-
-```javascript
-// Daten exportieren
-const data = exportAddressBookData();
-console.log(JSON.stringify(data));
-
-// Daten importieren
-importAddressBookData(data);
-```
-
-## 📁 Projektstruktur
+## Architektur
 
 ```
-Adressbuch/
-├── index.html          # Hauptdatei
-├── styles.css          # Styling
-├── app.js              # JavaScript-Logik
-├── sw.js               # Service Worker
-├── manifest.json       # PWA-Manifest
-├── icon-192.png        # App-Icon (192x192)
-├── icon-512.png        # App-Icon (512x512)
-├── LICENSE             # Lizenz
-└── README.md           # Diese Datei
+┌─────────────────────────────────────────────────────────────┐
+│                        Browser A                             │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
+│  │   React UI   │───▶│  Automerge   │───▶│   IndexedDB  │  │
+│  └──────────────┘    │    Store     │    │   (Dexie)    │  │
+│         │             └──────────────┘    └──────────────┘  │
+│         │                     │                              │
+│         │             ┌───────▼──────┐                       │
+│         └────────────▶│  P2P Manager │                       │
+│                       └───────┬──────┘                       │
+│                               │                              │
+│                       ┌───────▼──────────┐                   │
+│                       │  WebRTC (DTLS)   │                   │
+│                       └───────┬──────────┘                   │
+└───────────────────────────────┼───────────────────────────────┘
+                                │
+                   ┌────────────▼────────────┐
+                   │  Signaling-Server (WS)  │
+                   │   (keine Persistenz)    │
+                   └────────────┬────────────┘
+                                │
+┌───────────────────────────────┼───────────────────────────────┐
+│                       ┌───────▼──────────┐                    │
+│                       │  WebRTC (DTLS)   │                    │
+│                       └───────┬──────────┘                    │
+│                               │                               │
+│                       ┌───────▼──────┐                        │
+│         ┌────────────▶│  P2P Manager │                        │
+│         │             └──────────────┘                        │
+│         │                     │                               │
+│  ┌──────┴───────┐    ┌───────▼──────┐    ┌──────────────┐   │
+│  │   React UI   │───▶│  Automerge   │───▶│   IndexedDB  │   │
+│  └──────────────┘    │    Store     │    │   (Dexie)    │   │
+│                      └──────────────┘    └──────────────┘   │
+│                        Browser B                             │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## 🎨 Anpassungen
+## Tech-Stack
 
-### Theme-Farben ändern
-In `styles.css` die CSS-Variablen anpassen:
+- **Frontend**: TypeScript, React, Vite
+- **State & Replikation**: Automerge (CRDT)
+- **Lokale Persistenz**: IndexedDB via Dexie
+- **P2P-Transport**: WebRTC mit simple-peer
+- **Signalisierung**: WebSocket-Server (Node.js, ws)
+- **Kryptografie**: Web Crypto API (ECDSA P-256)
 
-```css
-:root {
-    --primary-color: #2196F3;    /* Hauptfarbe */
-    --primary-dark: #1976D2;     /* Dunkle Variante */
-    --secondary-color: #4CAF50;  /* Sekundärfarbe */
-    /* ... */
+## Installation & Setup
+
+### Voraussetzungen
+
+- Node.js >= 18
+- npm >= 9
+
+### 1. Repository klonen
+
+```bash
+git clone https://github.com/yourusername/p2p-addressbook.git
+cd p2p-addressbook
+```
+
+### 2. Dependencies installieren
+
+```bash
+# Haupt-Projekt
+npm install
+
+# Signaling-Server
+cd signaling-server
+npm install
+cd ..
+```
+
+### 3. Signaling-Server starten
+
+In einem separaten Terminal:
+
+```bash
+cd signaling-server
+npm start
+```
+
+Der Server läuft auf `ws://localhost:8080`.
+
+### 4. Frontend-Dev-Server starten
+
+```bash
+npm run dev
+```
+
+Die App ist jetzt verfügbar unter `http://localhost:5173`.
+
+## Lokale Tests mit zwei Browsern
+
+### Variante 1: Zwei Browser-Fenster auf einem Gerät
+
+1. Öffne zwei Browser-Fenster/Tabs: `http://localhost:5173`
+2. In Fenster A:
+   - Gehe zu "Meine Adresse" und fülle dein Profil aus
+   - Gehe zu "Verbindungen" → "Einladung erstellen"
+   - Wähle die Felder aus, die du teilen möchtest
+   - Kopiere den Verbindungscode (z.B. `ABC123XY`)
+3. In Fenster B:
+   - Fülle ebenfalls dein Profil aus
+   - Gehe zu "Verbindungen" → "Mit Code verbinden"
+   - Gib den Code aus Fenster A ein
+4. Nach wenigen Sekunden sollten beide Peers verbunden sein
+5. Ändere ein Feld in Fenster A → Fenster B sieht das Update (falls Feld freigegeben)
+
+### Variante 2: Zwei Geräte im gleichen Netzwerk
+
+1. Finde die IP-Adresse deines Entwicklungsrechners:
+   ```bash
+   # Windows
+   ipconfig
+
+   # macOS/Linux
+   ifconfig
+   ```
+
+2. Signaling-Server-URL anpassen (falls nötig):
+   - Erstelle `.env`-Datei im Hauptverzeichnis:
+   ```
+   VITE_SIGNALING_URL=ws://<DEINE-IP>:8080
+   ```
+
+3. Auf Gerät 1: `http://<DEINE-IP>:5173`
+4. Auf Gerät 2: `http://<DEINE-IP>:5173`
+5. Verbinde wie in Variante 1 beschrieben
+
+## Datenmodell
+
+### AddressCard
+
+```typescript
+interface AddressCard {
+  id: string;
+  firstName: string;
+  lastName: string;
+  street: string;
+  postalCode: string;
+  city: string;
+  country: string;
+  email: string;
+  phone: string;
+  birthday: string; // ISO date
+  organization: string;
+  custom?: Record<string, string>;
+  updatedAt: string; // ISO timestamp
 }
 ```
 
-### Icons ersetzen
-Die Dateien `icon-192.png` und `icon-512.png` durch eigene PNG-Dateien ersetzen.
+### Connection (Peer-Verbindung)
 
-## 🔒 Datenschutz & Sicherheit
+```typescript
+interface Connection {
+  id: string; // peerId
+  label?: string;
+  peerPubKey: string;
+  allowedFields: string[]; // Whitelist
+  storeRemoteCard: boolean;
+  lastSyncAt?: string;
+  status: 'online' | 'offline' | 'syncing';
+  remoteCard?: Partial<AddressCard>;
+}
+```
 
-- ✅ Alle Daten bleiben lokal im Browser
-- ✅ Keine Server-Kommunikation
-- ✅ Keine Tracker oder Analytics
-- ✅ Keine Cookies
-- ✅ Open Source
+## P2P-Protokoll
 
-## 🛣️ Roadmap
+Die App verwendet folgendes Nachrichtenprotokoll für die Peer-Synchronisation:
 
-- [ ] WebRTC-Integration für echtes P2P
-- [ ] Ende-zu-Ende-Verschlüsselung
-- [ ] Gruppenchats
-- [ ] Datei-Anhänge (Bilder, PDFs)
-- [ ] Push-Benachrichtigungen
-- [ ] Import/Export als vCard
-- [ ] Synchronisation zwischen Geräten
-- [ ] Dark Mode
+1. **HELLO**: Peer-Identifikation und App-Version
+2. **POLICY**: Übermittlung der erlaubten Felder
+3. **STATE_HASH**: Hash des aktuellen freigegebenen States
+4. **PATCH**: Differenzielle Aktualisierung bei Abweichung
+5. **ACK**: Bestätigung mit neuem Hash
 
-## 🤝 Mitwirken
+### Ablauf bei Verbindungsaufbau
 
-Contributions sind willkommen! Bitte:
-1. Fork das Repository
-2. Erstelle einen Feature-Branch
-3. Commit deine Änderungen
-4. Push zum Branch
-5. Öffne einen Pull Request
+```
+Peer A                              Peer B
+  │                                    │
+  ├─────── HELLO ─────────────────────▶│
+  │◀────── HELLO ───────────────────────┤
+  │                                    │
+  ├─────── POLICY ────────────────────▶│
+  │◀────── POLICY ──────────────────────┤
+  │                                    │
+  ├─────── STATE_HASH ────────────────▶│
+  │◀────── STATE_HASH ──────────────────┤
+  │                                    │
+  │ (Hash-Vergleich)                    │ (Hash-Vergleich)
+  │                                    │
+  ├─────── PATCH ─────────────────────▶│ (bei Abweichung)
+  │◀────── ACK ──────────────────────────┤
+  │                                    │
+  │ ✅ Synchron                         │ ✅ Synchron
+```
 
-## 📄 Lizenz
+## Scripts
 
-Siehe [LICENSE](LICENSE) Datei für Details.
+```bash
+# Frontend-Entwicklung
+npm run dev           # Vite Dev-Server
+npm run build         # Production-Build
+npm run preview       # Preview des Builds
 
-## 💡 Inspiration
+# Tests
+npm test              # Unit-Tests (Vitest)
+npm run test:e2e      # E2E-Tests (Playwright)
 
-Entwickelt als dezentrale Alternative zu zentralisierten Kontaktverwaltungssystemen mit dem Fokus auf Datenschutz und Nutzer-Kontrolle.
+# Signaling-Server
+cd signaling-server
+npm start             # Server starten
+npm run dev           # Server mit Auto-Reload
+```
+
+## Projektstruktur
+
+```
+.
+├── src/
+│   ├── components/          # React-Komponenten
+│   │   ├── Dashboard.tsx
+│   │   ├── MyCard.tsx
+│   │   ├── Connections.tsx
+│   │   ├── ConnectionInvite.tsx
+│   │   └── PolicyEditor.tsx
+│   ├── context/             # React Context
+│   │   └── AppContext.tsx
+│   ├── p2p/                 # P2P-Logik
+│   │   ├── p2p-manager.ts
+│   │   ├── signaling.ts
+│   │   ├── peer-connection.ts
+│   │   └── sync-controller.ts
+│   ├── store/               # Automerge + Dexie
+│   │   ├── automerge-store.ts
+│   │   └── db.ts
+│   ├── types/               # TypeScript-Typen
+│   │   └── index.ts
+│   ├── utils/               # Hilfsfunktionen
+│   │   ├── crypto.ts
+│   │   ├── hash.ts
+│   │   └── policy.ts
+│   ├── App.tsx
+│   ├── App.css
+│   └── main.tsx
+├── signaling-server/        # WebSocket-Signaling-Server
+│   ├── index.js
+│   └── package.json
+├── tests/
+│   └── e2e/                 # Playwright E2E-Tests
+│       └── basic.spec.ts
+├── package.json
+├── vite.config.ts
+├── tsconfig.json
+└── README.md
+```
+
+## Sicherheit & Privatsphäre
+
+- **Privacy by Default**: Standardmäßig werden keine Felder geteilt
+- **Feldgenaue Kontrolle**: Nutzer wählt pro Verbindung aus, welche Felder sichtbar sind
+- **Peer-Authentizität**: Fingerprint (Hash des Public Keys) wird angezeigt
+- **Transport-Verschlüsselung**: WebRTC nutzt DTLS (Datagram Transport Layer Security)
+- **Keine Server-seitige Datenhaltung**: Signaling-Server kennt nur Session-Metadaten
+- **Lokale Speicherung**: Alle Daten bleiben im Browser (IndexedDB)
+
+### Was der Signaling-Server sieht
+
+Der Signaling-Server sieht nur:
+- Peer-IDs (zufällige UUIDs)
+- Raum-Codes (temporär)
+- WebRTC-Signaling-Daten (ICE-Kandidaten, SDP-Offers)
+
+Er sieht **nicht**:
+- Adressdaten
+- Welche Felder geteilt werden
+- Den Inhalt der P2P-Nachrichten (diese laufen über den verschlüsselten WebRTC-Kanal)
+
+## Tests
+
+### Unit-Tests ausführen
+
+```bash
+npm test
+```
+
+Tests für:
+- Policy-Engine (Feld-Projektion, Validierung)
+- Hash-Utilities (Deterministische Serialisierung)
+
+### E2E-Tests ausführen
+
+```bash
+# Installation (einmalig)
+npx playwright install
+
+# Tests ausführen
+npm run test:e2e
+```
+
+## Roadmap (Zukünftige Phasen)
+
+Phase 1 (aktuell):
+- ✅ Lokale Speicherung
+- ✅ WebRTC P2P-Verbindungen
+- ✅ Feldgenaue Freigabe
+- ✅ Automerge CRDT
+
+Phase 2 (geplant):
+- [ ] PWA (Progressive Web App)
+- [ ] Service Worker für Offline-Nutzung
+- [ ] Custom-Felder-UI
+- [ ] Multi-Peer-Gruppen
+
+Phase 3 (geplant):
+- [ ] Ende-zu-Ende-Verschlüsselung der Felder
+- [ ] IPFS-Integration für verschlüsselte Backups
+- [ ] Doichain-Integration für Identitäts-/Policy-Management
+- [ ] Mobile Apps (React Native)
+
+## Bekannte Einschränkungen
+
+- **NAT-Traversal**: WebRTC funktioniert nicht immer hinter strengen Firewalls/NATs. In solchen Fällen wäre ein TURN-Server nötig (nicht in Phase 1).
+- **Peer-Discovery**: Aktuell erfolgt Verbindung nur via manuellem Code-Austausch. Automatisches Discovery ist nicht implementiert.
+- **Skalierung**: Optimiert für 1:1 oder kleine Gruppen (< 10 Peers). Viele gleichzeitige Verbindungen können Performance beeinträchtigen.
+- **Browser-Kompatibilität**: Benötigt modernen Browser mit WebRTC- und IndexedDB-Support.
+
+## Lizenz
+
+MIT License - siehe [LICENSE](LICENSE)
+
+## Mitwirken
+
+Contributions sind willkommen! Bitte erstelle ein Issue oder Pull Request.
+
+## Support
+
+Bei Problemen bitte ein Issue auf GitHub erstellen.
 
 ---
 
-**Viel Spaß mit deinem dezentralen Adressbuch! 📒✨**
+**Hinweis**: Dies ist eine Entwicklungsversion (Phase 1). Für Produktivnutzung werden weitere Sicherheits-Features (E2E-Verschlüsselung, TURN-Server) empfohlen

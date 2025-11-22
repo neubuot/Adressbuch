@@ -1,0 +1,46 @@
+{
+  "name": "p2p-addressbook",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:e2e": "playwright test",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+  },
+  "dependencies": {
+    "@automerge/automerge": "^2.2.8",
+    "buffer": "^6.0.3",
+    "dexie": "^4.0.11",
+    "jsdom": "^27.0.1",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "readable-stream": "^4.7.0",
+    "simple-peer": "^9.11.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.2",
+    "@types/node": "^22.10.7",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@types/simple-peer": "^9.11.8",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.18.2",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.18.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11",
+    "vite-plugin-pwa": "^0.21.1",
+    "vite-plugin-top-level-await": "^1.4.4",
+    "vite-plugin-wasm": "^3.3.0",
+    "vitest": "^2.1.8",
+    "workbox-window": "^7.3.0"
+  }
+}
