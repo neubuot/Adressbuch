@@ -5,12 +5,17 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { store } from '../store/automerge-store';
 import { initP2PManager, getP2PManager } from '../p2p/p2p-manager';
-import type { AppState } from '../types';
+import type { AppState, Message, ChatMessage } from '../types';
 
 interface AppContextValue {
   appState: AppState;
   refresh: () => void;
   isInitialized: boolean;
+  // Message functions
+  addMessage: (message: Message) => void;
+  deleteMessage: (messageId: string) => void;
+  markMessageAsRead: (messageId: string) => void;
+  sendChatMessage: (connectionId: string, text: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -71,8 +76,68 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAppState(store.getDoc());
   };
 
+  // Message functions
+  const addMessage = (message: Message) => {
+    store.updateDoc('Add message', (doc) => {
+      if (!doc.messages) {
+        doc.messages = [];
+      }
+      doc.messages.push(message);
+    });
+  };
+
+  const deleteMessage = (messageId: string) => {
+    store.updateDoc('Delete message', (doc) => {
+      if (doc.messages) {
+        const index = doc.messages.findIndex(m => m.id === messageId);
+        if (index !== -1) {
+          doc.messages.splice(index, 1);
+        }
+      }
+    });
+  };
+
+  const markMessageAsRead = (messageId: string) => {
+    store.updateDoc('Mark message as read', (doc) => {
+      if (doc.messages) {
+        const message = doc.messages.find(m => m.id === messageId);
+        if (message) {
+          message.read = true;
+        }
+      }
+    });
+  };
+
+  const sendChatMessage = async (connectionId: string, text: string) => {
+    const manager = getP2PManager();
+    if (!manager) return;
+
+    const chatMessage: ChatMessage = {
+      type: 'CHAT',
+      id: crypto.randomUUID(),
+      text,
+      timestamp: new Date().toISOString(),
+      senderId: appState.myCard.id
+    };
+
+    try {
+      await manager.sendMessage(connectionId, chatMessage);
+    } catch (error) {
+      console.error('Failed to send chat message:', error);
+      throw error;
+    }
+  };
+
   return (
-    <AppContext.Provider value={{ appState, refresh, isInitialized }}>
+    <AppContext.Provider value={{
+      appState,
+      refresh,
+      isInitialized,
+      addMessage,
+      deleteMessage,
+      markMessageAsRead,
+      sendChatMessage
+    }}>
       {children}
     </AppContext.Provider>
   );

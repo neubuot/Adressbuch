@@ -33,6 +33,7 @@ export class AutomergeStore {
       connections: {},
       tags: {},
       knownPeers: [],
+      messages: [],
     };
     this.doc = Automerge.from(initialState as Record<string, unknown>) as Automerge.Doc<AppState>;
   }
@@ -59,6 +60,14 @@ export class AutomergeStore {
         if (!this.doc.tags) {
           this.doc = Automerge.change(this.doc, 'Add tags field', (doc) => {
             doc.tags = {};
+          });
+          await this.save();
+        }
+
+        // Migration: Füge messages-Feld hinzu falls es nicht existiert
+        if (!this.doc.messages) {
+          this.doc = Automerge.change(this.doc, 'Add messages field', (doc) => {
+            doc.messages = [];
           });
           await this.save();
         }

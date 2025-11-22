@@ -15,6 +15,8 @@ import type {
   StateHashMessage,
   PatchMessage,
   AckMessage,
+  ChatMessage,
+  Message,
 } from '../types';
 
 export type SyncStatus = 'idle' | 'connecting' | 'handshake' | 'syncing' | 'synced' | 'error';
@@ -110,9 +112,45 @@ export class SyncController {
       case 'ACK':
         this.handleAck(message as AckMessage);
         break;
+      case 'CHAT':
+        this.handleChat(message as ChatMessage);
+        break;
       default:
         console.warn(`Unbekannter Nachrichtentyp: ${(message as P2PMessage).type}`);
     }
+  }
+
+  /**
+   * Verarbeitet eingehende Chat-Nachricht
+   */
+  private handleChat(message: ChatMessage): void {
+    const connectionId = this.getConnectionId();
+
+    // Erstelle Message für lokalen Store
+    const localMessage: Message = {
+      id: message.id,
+      connectionId,
+      text: message.text,
+      type: 'received',
+      timestamp: message.timestamp,
+      read: false
+    };
+
+    // Füge zur Messages-Liste hinzu
+    store.updateDoc('Received chat message', (doc) => {
+      if (!doc.messages) {
+        doc.messages = [];
+      }
+      doc.messages.push(localMessage);
+
+      // Update unread count for connection
+      if (doc.connections[connectionId]) {
+        doc.connections[connectionId].unreadMessages =
+          (doc.connections[connectionId].unreadMessages || 0) + 1;
+      }
+    });
+
+    console.log(`💬 Chat-Nachricht empfangen von ${connectionId.substring(0, 8)}`);
   }
 
   /**

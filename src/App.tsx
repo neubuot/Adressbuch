@@ -8,9 +8,10 @@ import { Dashboard } from './components/Dashboard';
 import { MyCard } from './components/MyCard';
 import { Connections } from './components/Connections';
 import { PolicyEditor } from './components/PolicyEditor';
+import { Messages } from './components/Messages';
 import './App.css';
 
-type View = 'dashboard' | 'mycard' | 'connections' | 'policy';
+type View = 'dashboard' | 'mycard' | 'connections' | 'policy' | 'messages';
 
 function AppContent() {
   const { appState } = useAppContext();
@@ -39,6 +40,8 @@ function AppContent() {
             }}
           />
         );
+      case 'messages':
+        return <Messages onBack={() => setCurrentView('dashboard')} />;
       case 'policy':
         return (
           <PolicyEditor
@@ -73,6 +76,12 @@ function AppContent() {
             className={currentView === 'connections' ? 'active' : ''}
           >
             Verbindungen
+          </button>
+          <button
+            onClick={() => setCurrentView('messages')}
+            className={currentView === 'messages' ? 'active' : ''}
+          >
+            💬 Nachrichten
           </button>
         </nav>
       </header>

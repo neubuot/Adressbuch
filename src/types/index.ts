@@ -27,6 +27,16 @@ export interface Tag {
   createdAt: string; // ISO timestamp
 }
 
+// Chat-Nachricht (für lokale Speicherung)
+export interface Message {
+  id: string;
+  connectionId: string; // zu welchem Peer
+  text: string; // max 210 characters
+  type: 'sent' | 'received';
+  timestamp: string; // ISO timestamp
+  read: boolean;
+}
+
 // Verbindung zu einem Peer
 export interface Connection {
   id: string; // peerId
@@ -39,6 +49,7 @@ export interface Connection {
   status: 'online' | 'offline' | 'syncing';
   remoteCard?: Partial<AddressCard>; // gespeicherte fremde Karte
   tagIds?: string[]; // zugewiesene Tags
+  unreadMessages?: number; // Anzahl ungelesener Nachrichten
 }
 
 // Gesamter App-State
@@ -47,6 +58,7 @@ export interface AppState {
   connections: Record<string, Connection>;
   tags: Record<string, Tag>; // verfügbare Tags
   knownPeers: string[]; // optional, für Discovery/History
+  messages: Message[]; // alle Chat-Nachrichten
 }
 
 // Nachrichten-Protokoll
@@ -80,12 +92,22 @@ export interface AckMessage {
   hash: string;
 }
 
+// Chat Message (max 210 characters) - für P2P-Übertragung
+export interface ChatMessage {
+  type: 'CHAT';
+  id: string;
+  text: string; // max 210 characters
+  timestamp: string; // ISO timestamp
+  senderId: string; // peerId of sender
+}
+
 export type P2PMessage =
   | HelloMessage
   | PolicyMessage
   | StateHashMessage
   | PatchMessage
-  | AckMessage;
+  | AckMessage
+  | ChatMessage;
 
 // Standard-Felder der AddressCard (für UI und Validierung)
 export const ADDRESS_CARD_FIELDS = [
