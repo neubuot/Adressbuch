@@ -76,9 +76,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     const sendPendingMessages = async () => {
       const manager = getP2PManager();
-      if (!manager) return;
+      if (!manager) {
+        console.log('⏸️ P2P Manager nicht verfügbar');
+        return;
+      }
 
       const pendingMessages = appState.pendingMessages || [];
+      console.log(`📋 Pending messages check: ${pendingMessages.length} in queue`);
+
       if (pendingMessages.length === 0) return;
 
       // Group pending messages by connection
@@ -90,9 +95,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         messagesByConnection[msg.connectionId].push(msg);
       }
 
+      console.log(`📊 Messages grouped by connection:`, Object.keys(messagesByConnection).map(id => `${id.substring(0, 8)}: ${messagesByConnection[id].length} msg`));
+
       // Try to send messages for online connections
       for (const [connectionId, messages] of Object.entries(messagesByConnection)) {
         const connection = appState.connections[connectionId];
+        const status = connection?.status || 'unknown';
+
+        console.log(`🔍 Check connection ${connectionId.substring(0, 8)}: status=${status}`);
+
         if (connection && connection.status === 'online') {
           console.log(`📤 Versende ${messages.length} ausstehende Nachricht(en) an ${connectionId.substring(0, 8)}`);
 
@@ -106,6 +117,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 sentAt: message.sentAt,
               };
 
+              console.log(`📨 Sende Nachricht: "${message.text.substring(0, 20)}..."`);
               await manager.sendMessage(connectionId, chatMessage);
 
               // Update message status to 'sent'
@@ -124,10 +136,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               console.error(`❌ Fehler beim Senden von Nachricht ${message.id.substring(0, 8)}:`, error);
             }
           }
+        } else {
+          console.log(`⏸️ Connection ${connectionId.substring(0, 8)} ist ${status}, überspringe`);
         }
       }
     };
 
+    console.log('🔄 useEffect triggered: checking pending messages...');
     sendPendingMessages();
   }, [appState.connections, appState.pendingMessages]);
 
