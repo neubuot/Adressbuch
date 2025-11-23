@@ -24,7 +24,7 @@ interface ExportData {
 
 export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
   const { appState } = useAppContext();
-  const [activeTab, setActiveTab] = useState<'export' | 'import'>('export');
+  const [activeTab, setActiveTab] = useState<'export' | 'import' | 'backup'>('export');
   const [selectedFields, setSelectedFields] = useState<string[]>([
     'firstName',
     'lastName',
@@ -32,6 +32,7 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
   ]);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [roomCode, setRoomCode] = useState<string>('');
+  const [backupPassword, setBackupPassword] = useState<string>('');
 
   const availableFields = [
     { key: 'firstName', label: 'Vorname' },
@@ -164,6 +165,100 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
     }
   };
 
+  // Komplettes Backup exportieren (Identität + State)
+  const exportCompleteBackup = () => {
+    try {
+      // 1. Exportiere P2P-Keypair aus localStorage
+      const keypairStr = localStorage.getItem('p2p-keypair');
+      if (!keypairStr) {
+        alert('❌ Keine P2P-Identität gefunden! Bitte erst eine Verbindung herstellen.');
+        return;
+      }
+      const keypair = JSON.parse(keypairStr);
+
+      // 2. Exportiere Automerge-State
+      const automergeState = store.export();
+      const automergeBase64 = btoa(String.fromCharCode(...automergeState));
+
+      // 3. Erstelle komplettes Backup
+      const backup = {
+        version: '1.0',
+        type: 'complete-backup',
+        exportedAt: new Date().toISOString(),
+        identity: {
+          keypair: keypair,
+        },
+        state: {
+          automerge: automergeBase64,
+        },
+      };
+
+      // 4. Download als JSON
+      const dataStr = JSON.stringify(backup, null, 2);
+      const dataBlob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(dataBlob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `adressbuch-backup-${new Date().toISOString().split('T')[0]}.json`;
+      link.click();
+
+      URL.revokeObjectURL(url);
+
+      alert('✅ Komplettes Backup erfolgreich exportiert!');
+    } catch (error) {
+      console.error('Fehler beim Exportieren des Backups:', error);
+      alert('❌ Fehler beim Exportieren des Backups');
+    }
+  };
+
+  // Komplettes Backup importieren (Identität + State)
+  const handleImportCompleteBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+
+      // Validierung
+      if (backup.type !== 'complete-backup' || !backup.identity || !backup.state) {
+        alert('❌ Ungültiges Backup-Format!');
+        return;
+      }
+
+      // Warnung: Überschreibt aktuelle Identität
+      const confirmed = confirm(
+        '⚠️ ACHTUNG: Dieser Import wird deine aktuelle Identität und alle Daten überschreiben!\n\n' +
+        'Bitte stelle sicher, dass du ein aktuelles Backup hast.\n\n' +
+        'Möchtest du fortfahren?'
+      );
+
+      if (!confirmed) return;
+
+      // 1. Restore P2P-Keypair zu localStorage
+      localStorage.setItem('p2p-keypair', JSON.stringify(backup.identity.keypair));
+
+      // 2. Restore Automerge-State
+      const automergeBytes = Uint8Array.from(atob(backup.state.automerge), c => c.charCodeAt(0));
+      await store.merge(automergeBytes);
+
+      alert(
+        '✅ Backup erfolgreich wiederhergestellt!\n\n' +
+        '🔄 Bitte lade die Seite neu, um die Änderungen zu übernehmen.'
+      );
+
+      // Auto-Reload nach 2 Sekunden
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+
+    } catch (error) {
+      console.error('Fehler beim Importieren des Backups:', error);
+      alert('❌ Fehler beim Importieren des Backups: ' + (error as Error).message);
+    }
+  };
+
   return (
     <div
       style={{
@@ -212,6 +307,13 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
             style={{ borderRadius: '0.375rem 0.375rem 0 0' }}
           >
             📥 Import
+          </button>
+          <button
+            className={`btn ${activeTab === 'backup' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setActiveTab('backup')}
+            style={{ borderRadius: '0.375rem 0.375rem 0 0' }}
+          >
+            💾 Komplettes Backup
           </button>
         </div>
 
@@ -333,6 +435,86 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
                 onChange={handleImportJSON}
                 style={{ fontSize: '0.875rem' }}
               />
+            </div>
+          </div>
+        )}
+
+        {/* Backup Tab */}
+        {activeTab === 'backup' && (
+          <div>
+            <h3 style={{ marginBottom: '1rem' }}>💾 Komplettes Backup (Identität + Daten)</h3>
+            <div style={{ padding: '1rem', backgroundColor: '#fff3cd', borderRadius: '0.375rem', marginBottom: '1.5rem', border: '1px solid #ffc107' }}>
+              <p style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>
+                <strong>💡 Wozu dient das komplette Backup?</strong>
+              </p>
+              <ul style={{ fontSize: '0.875rem', marginLeft: '1.25rem', marginBottom: '0.5rem' }}>
+                <li>🔑 <strong>Identität sichern:</strong> Deine P2P-Identität (Keypair) wird gespeichert</li>
+                <li>📇 <strong>Alle Daten:</strong> Kontakte, Nachrichten, Tags, Verbindungen</li>
+                <li>🌐 <strong>Incognito-Modus:</strong> Perfekt für private Browser-Fenster</li>
+                <li>💻 <strong>Geräte-Wechsel:</strong> Nutze dieselbe Identität auf mehreren Geräten</li>
+              </ul>
+              <p style={{ fontSize: '0.875rem', color: '#856404' }}>
+                ⚠️ <strong>Wichtig:</strong> Diese Datei enthält deine privaten Schlüssel! Bewahre sie sicher auf.
+              </p>
+            </div>
+
+            {/* Export Backup */}
+            <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: 'var(--background)', borderRadius: '0.375rem' }}>
+              <h4 style={{ marginBottom: '0.75rem', fontSize: '1rem' }}>📤 Backup erstellen</h4>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                Exportiere deine komplette Identität und alle Daten als verschlüsselte JSON-Datei.
+              </p>
+              <div style={{ marginBottom: '1rem' }}>
+                <p style={{ fontSize: '0.875rem', marginBottom: '0.5rem', fontWeight: 'bold' }}>
+                  Das Backup enthält:
+                </p>
+                <ul style={{ fontSize: '0.875rem', marginLeft: '1.25rem' }}>
+                  <li>✅ Dein P2P-Keypair (Identität)</li>
+                  <li>✅ Deine Visitenkarte ({appState.myCard.firstName} {appState.myCard.lastName})</li>
+                  <li>✅ {Object.keys(appState.connections).length} Verbindung(en)</li>
+                  <li>✅ {appState.messages?.length || 0} Nachricht(en)</li>
+                  <li>✅ {Object.keys(appState.tags).length} Tag(s)</li>
+                </ul>
+              </div>
+              <button className="btn btn-primary" onClick={exportCompleteBackup}>
+                💾 Backup jetzt erstellen
+              </button>
+            </div>
+
+            {/* Import Backup */}
+            <div style={{ padding: '1rem', backgroundColor: 'var(--background)', borderRadius: '0.375rem' }}>
+              <h4 style={{ marginBottom: '0.75rem', fontSize: '1rem' }}>📥 Backup wiederherstellen</h4>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '1rem' }}>
+                Lade ein zuvor erstelltes Backup hoch, um deine Identität und Daten wiederherzustellen.
+              </p>
+              <div style={{ padding: '1rem', backgroundColor: '#f8d7da', borderRadius: '0.375rem', marginBottom: '1rem', border: '1px solid #f5c6cb' }}>
+                <p style={{ fontSize: '0.875rem', color: '#721c24', marginBottom: '0.5rem' }}>
+                  <strong>⚠️ ACHTUNG:</strong>
+                </p>
+                <ul style={{ fontSize: '0.875rem', color: '#721c24', marginLeft: '1.25rem' }}>
+                  <li>Überschreibt deine aktuelle Identität</li>
+                  <li>Überschreibt alle deine aktuellen Daten</li>
+                  <li>Erstelle vorher ein Backup der aktuellen Daten!</li>
+                </ul>
+              </div>
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleImportCompleteBackup}
+                style={{ fontSize: '0.875rem' }}
+              />
+            </div>
+
+            {/* Anleitung für Incognito-Modus */}
+            <div style={{ marginTop: '1.5rem', padding: '1rem', backgroundColor: '#e7f3ff', borderRadius: '0.375rem', border: '1px solid #b3d9ff' }}>
+              <h4 style={{ marginBottom: '0.75rem', fontSize: '1rem' }}>🕵️ Nutzung im Incognito-Modus</h4>
+              <ol style={{ fontSize: '0.875rem', marginLeft: '1.25rem', lineHeight: '1.6' }}>
+                <li><strong>Vor dem Schließen:</strong> Erstelle ein Backup (Button oben)</li>
+                <li><strong>Datei speichern:</strong> Lade die JSON-Datei herunter</li>
+                <li><strong>Beim Neustart:</strong> Öffne das Adressbuch im Incognito-Fenster</li>
+                <li><strong>Backup laden:</strong> Gehe zu "Komplettes Backup" → "Backup wiederherstellen"</li>
+                <li><strong>Identität zurück:</strong> Deine Verbindungen sind wieder da! 🎉</li>
+              </ol>
             </div>
           </div>
         )}
