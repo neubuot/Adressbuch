@@ -206,9 +206,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (message) {
           message.deliveryStatus = isOnline ? 'sent' : 'pending';
           if (!isOnline) {
-            // Füge zu pending queue hinzu
+            // Füge zu pending queue hinzu - WICHTIG: Kopiere Werte, nicht Referenz!
             if (!doc.pendingMessages) doc.pendingMessages = [];
-            doc.pendingMessages.push(message);
+            // Erstelle neues Objekt mit kopierten Werten (Automerge erlaubt keine externen Referenzen)
+            doc.pendingMessages.push({
+              id: message.id,
+              connectionId: message.connectionId,
+              text: message.text,
+              type: message.type,
+              timestamp: message.timestamp,
+              sentAt: message.sentAt,
+              deliveryStatus: message.deliveryStatus,
+              read: message.read
+            });
             console.log(`📋 Nachricht zur Queue hinzugefügt: ${messageId.substring(0, 8)}`);
           }
         } else {
