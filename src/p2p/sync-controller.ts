@@ -460,8 +460,62 @@ export class SyncController {
   /**
    * Aktualisiert den Connection-Status im Store
    */
-  private updateConnectionStatus(status: 'online' | 'offline' | 'syncing'): void {
-    store.updateConnection(this.getConnectionId(), { status });
+  private async updateConnectionStatus(status: 'online' | 'offline' | 'syncing'): Promise<void> {
+    await store.updateConnection(this.getConnectionId(), { status });
+
+    // Wenn Peer online kommt, sende ausstehende Nachrichten
+    if (status === 'online') {
+      await this.sendPendingMessages();
+    }
+  }
+
+  /**
+   * Sendet ausstehende Nachrichten wenn Peer online kommt
+   */
+  private async sendPendingMessages(): Promise<void> {
+    const connectionId = this.getConnectionId();
+    const doc = store.getDoc();
+    const pendingMessages = doc.pendingMessages || [];
+
+    // Finde Nachrichten für diese Connection
+    const messagesToSend = pendingMessages.filter(msg => msg.connectionId === connectionId);
+
+    if (messagesToSend.length === 0) {
+      console.log(`📋 Keine ausstehenden Nachrichten für ${connectionId.substring(0, 8)}`);
+      return;
+    }
+
+    console.log(`📤 Versende ${messagesToSend.length} ausstehende Nachricht(en) an ${connectionId.substring(0, 8)}`);
+
+    for (const message of messagesToSend) {
+      try {
+        const chatMessage = {
+          type: 'CHAT' as const,
+          id: message.id,
+          text: message.text,
+          timestamp: message.timestamp,
+          sentAt: message.sentAt,
+        };
+
+        console.log(`📨 Sende ausstehende Nachricht: "${message.text.substring(0, 30)}..."`);
+        this.peerConnection.send(chatMessage);
+
+        // Update message status to 'sent'
+        await store.updateDoc('Message sent from queue', (doc) => {
+          const msg = doc.messages?.find(m => m.id === message.id);
+          if (msg) msg.deliveryStatus = 'sent';
+
+          // Remove from pending queue
+          if (doc.pendingMessages) {
+            doc.pendingMessages = doc.pendingMessages.filter(m => m.id !== message.id);
+          }
+        });
+
+        console.log(`✅ Nachricht ${message.id.substring(0, 8)} erfolgreich aus Queue gesendet`);
+      } catch (error) {
+        console.error(`❌ Fehler beim Senden von Nachricht ${message.id.substring(0, 8)}:`, error);
+      }
+    }
   }
 
   /**
