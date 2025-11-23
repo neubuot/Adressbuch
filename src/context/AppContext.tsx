@@ -72,6 +72,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
+  // Auto-send pending messages when peer comes online
+  useEffect(() => {
+    const sendPendingMessages = async () => {
+      const manager = getP2PManager();
+      if (!manager) return;
+
+      const pendingMessages = appState.pendingMessages || [];
+      if (pendingMessages.length === 0) return;
+
+      // Group pending messages by connection
+      const messagesByConnection: Record<string, Message[]> = {};
+      for (const msg of pendingMessages) {
+        if (!messagesByConnection[msg.connectionId]) {
+          messagesByConnection[msg.connectionId] = [];
+        }
+        messagesByConnection[msg.connectionId].push(msg);
+      }
+
+      // Try to send messages for online connections
+      for (const [connectionId, messages] of Object.entries(messagesByConnection)) {
+        const connection = appState.connections[connectionId];
+        if (connection && connection.status === 'online') {
+          console.log(`📤 Versende ${messages.length} ausstehende Nachricht(en) an ${connectionId.substring(0, 8)}`);
+
+          for (const message of messages) {
+            try {
+              const chatMessage = {
+                type: 'CHAT' as const,
+                id: message.id,
+                text: message.text,
+                timestamp: message.timestamp,
+                sentAt: message.sentAt,
+              };
+
+              await manager.sendMessage(connectionId, chatMessage);
+
+              // Update message status to 'sent'
+              store.updateDoc('Message sent from queue', (doc) => {
+                const msg = doc.messages?.find(m => m.id === message.id);
+                if (msg) msg.deliveryStatus = 'sent';
+
+                // Remove from pending queue
+                if (doc.pendingMessages) {
+                  doc.pendingMessages = doc.pendingMessages.filter(m => m.id !== message.id);
+                }
+              });
+
+              console.log(`✅ Nachricht ${message.id.substring(0, 8)} erfolgreich gesendet`);
+            } catch (error) {
+              console.error(`❌ Fehler beim Senden von Nachricht ${message.id.substring(0, 8)}:`, error);
+            }
+          }
+        }
+      }
+    };
+
+    sendPendingMessages();
+  }, [appState.connections, appState.pendingMessages]);
+
   const refresh = () => {
     setAppState(store.getDoc());
   };

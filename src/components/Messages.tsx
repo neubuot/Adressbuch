@@ -20,9 +20,16 @@ export function Messages({ onBack }: MessagesProps) {
   const [messageText, setMessageText] = useState('');
   const [filter, setFilter] = useState<MessageFilter>('all');
 
-  // Filter online connections
-  const onlineConnections = useMemo(() => {
-    return Object.values(appState.connections).filter(c => c.status === 'online');
+  // Get all connections (online and offline)
+  const allConnections = useMemo(() => {
+    return Object.values(appState.connections).sort((a, b) => {
+      // Sort: online first, then by name
+      if (a.status === 'online' && b.status !== 'online') return -1;
+      if (a.status !== 'online' && b.status === 'online') return 1;
+      const nameA = a.label || a.id;
+      const nameB = b.label || b.id;
+      return nameA.localeCompare(nameB);
+    });
   }, [appState.connections]);
 
   // Filter messages based on current filter
@@ -158,14 +165,18 @@ export function Messages({ onBack }: MessagesProps) {
             className="connection-select"
           >
             <option value="">Empfänger wählen...</option>
-            {onlineConnections.length === 0 && (
-              <option disabled>Keine Online-Verbindungen</option>
+            {allConnections.length === 0 && (
+              <option disabled>Keine Verbindungen vorhanden</option>
             )}
-            {onlineConnections.map(conn => (
-              <option key={conn.id} value={conn.id}>
-                🟢 {getConnectionName(conn.id)}
-              </option>
-            ))}
+            {allConnections.map(conn => {
+              const statusIcon = conn.status === 'online' ? '🟢' : '🔴';
+              const statusText = conn.status === 'online' ? '' : ' (offline - wird in Queue gespeichert)';
+              return (
+                <option key={conn.id} value={conn.id}>
+                  {statusIcon} {getConnectionName(conn.id)}{statusText}
+                </option>
+              );
+            })}
           </select>
 
           <div className="message-input-wrapper">
