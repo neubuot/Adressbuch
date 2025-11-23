@@ -128,6 +128,16 @@ export class AutomergeStore {
   }
 
   /**
+   * Alias für change() - für Kompatibilität
+   */
+  async updateDoc(
+    message: string,
+    callback: (doc: AppState) => void
+  ): Promise<Automerge.Doc<AppState>> {
+    return this.change(message, callback);
+  }
+
+  /**
    * Aktualisiert die MyCard
    */
   async updateMyCard(updates: Partial<AddressCard>): Promise<void> {

@@ -67,15 +67,26 @@ export function Messages({ onBack }: MessagesProps) {
       read: true
     };
 
-    addMessage(message);
+    try {
+      // Add to local store
+      addMessage(message);
+      console.log('💬 Nachricht lokal gespeichert:', message);
 
-    // Send via P2P if connection is online
-    const connection = appState.connections[selectedConnectionId];
-    if (connection && connection.status === 'online') {
-      await sendChatMessage(selectedConnectionId, messageText.trim());
+      // Send via P2P if connection is online
+      const connection = appState.connections[selectedConnectionId];
+      if (connection && connection.status === 'online') {
+        await sendChatMessage(selectedConnectionId, messageText.trim());
+        console.log('📤 Nachricht via P2P gesendet');
+      } else {
+        console.warn('⚠️ Connection nicht online, Nachricht nur lokal gespeichert');
+      }
+
+      // Clear input
+      setMessageText('');
+    } catch (error) {
+      console.error('❌ Fehler beim Senden:', error);
+      alert('Fehler beim Senden der Nachricht: ' + (error as Error).message);
     }
-
-    setMessageText('');
   };
 
   const handleDeleteMessage = (messageId: string) => {
