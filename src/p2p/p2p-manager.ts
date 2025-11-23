@@ -307,6 +307,27 @@ export class P2PManager {
   }
 
   /**
+   * Sendet eine Nachricht an einen verbundenen Peer
+   */
+  async sendMessage(connectionId: string, message: any): Promise<void> {
+    // Finde den SyncController für diese Connection
+    const syncController = this.connectionIdToController.get(connectionId);
+
+    if (!syncController) {
+      throw new Error(`Keine aktive Verbindung zu Peer ${connectionId.substring(0, 8)}`);
+    }
+
+    // Sende die Nachricht über die PeerConnection
+    const peerConnection = (syncController as any).peerConnection;
+    if (!peerConnection) {
+      throw new Error(`Keine PeerConnection für ${connectionId.substring(0, 8)}`);
+    }
+
+    peerConnection.send(message);
+    console.log(`📤 Nachricht gesendet an ${connectionId.substring(0, 8)}`);
+  }
+
+  /**
    * Beendet den P2P-Manager
    */
   destroy(): void {
