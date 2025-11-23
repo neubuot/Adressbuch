@@ -69,8 +69,9 @@ export function Messages({ onBack }: MessagesProps) {
     const connection = appState.connections[selectedConnectionId];
     const isOnline = connection && connection.status === 'online';
 
+    const messageId = crypto.randomUUID();
     const message: Message = {
-      id: crypto.randomUUID(),
+      id: messageId,
       connectionId: selectedConnectionId,
       text: messageText.trim(),
       type: 'sent',
@@ -81,12 +82,12 @@ export function Messages({ onBack }: MessagesProps) {
     };
 
     try {
-      // Add to local store
+      // Add to local store first
       addMessage(message);
       console.log('💬 Nachricht lokal gespeichert:', message);
 
       // Send via P2P (will update status automatically)
-      await sendChatMessage(selectedConnectionId, messageText.trim());
+      await sendChatMessage(selectedConnectionId, messageText.trim(), messageId);
 
       if (isOnline) {
         console.log('📤 Nachricht via P2P gesendet');

@@ -182,11 +182,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const sendChatMessage = async (connectionId: string, text: string) => {
+  const sendChatMessage = async (connectionId: string, text: string, messageId: string) => {
     const manager = getP2PManager();
     const connection = appState.connections[connectionId];
     const now = new Date().toISOString();
-    const messageId = crypto.randomUUID();
 
     const chatMessage: ChatMessage = {
       type: 'CHAT',
@@ -201,7 +200,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const isOnline = connection && connection.status === 'online';
 
     // Update lokale Message mit Status
-    store.updateDoc('Update message status', (doc) => {
+    await store.updateDoc('Update message status', (doc) => {
       if (doc.messages) {
         const message = doc.messages.find(m => m.id === messageId);
         if (message) {
@@ -210,7 +209,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             // Füge zu pending queue hinzu
             if (!doc.pendingMessages) doc.pendingMessages = [];
             doc.pendingMessages.push(message);
+            console.log(`📋 Nachricht zur Queue hinzugefügt: ${messageId.substring(0, 8)}`);
           }
+        } else {
+          console.error(`❌ Nachricht ${messageId.substring(0, 8)} nicht in doc.messages gefunden!`);
         }
       }
     });
