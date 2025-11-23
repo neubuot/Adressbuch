@@ -33,8 +33,12 @@ export interface Message {
   connectionId: string; // zu welchem Peer
   text: string; // max 210 characters
   type: 'sent' | 'received';
-  timestamp: string; // ISO timestamp
-  read: boolean;
+  timestamp: string; // ISO timestamp (deprecated, use sentAt)
+  sentAt: string; // Versanddatum/Erstellungsdatum
+  deliveredAt?: string; // Empfangsdatum (beim Empfänger)
+  readAt?: string; // Lesedatum
+  deliveryStatus: 'pending' | 'sent' | 'delivered' | 'read'; // Status
+  read: boolean; // Deprecated, use deliveryStatus
 }
 
 // Verbindung zu einem Peer
@@ -59,6 +63,7 @@ export interface AppState {
   tags: Record<string, Tag>; // verfügbare Tags
   knownPeers: string[]; // optional, für Discovery/History
   messages: Message[]; // alle Chat-Nachrichten
+  pendingMessages?: Message[]; // Nachrichten-Queue für offline Peers
 }
 
 // Nachrichten-Protokoll
@@ -98,7 +103,22 @@ export interface ChatMessage {
   id: string;
   text: string; // max 210 characters
   timestamp: string; // ISO timestamp
+  sentAt: string; // Versanddatum
   senderId: string; // peerId of sender
+}
+
+// Chat Delivery Receipt - Bestätigung für Nachrichtenempfang
+export interface ChatDeliveryMessage {
+  type: 'CHAT_DELIVERY';
+  messageId: string; // ID der bestätigten Nachricht
+  deliveredAt: string; // Empfangszeitpunkt
+}
+
+// Chat Read Receipt - Bestätigung dass Nachricht gelesen wurde
+export interface ChatReadMessage {
+  type: 'CHAT_READ';
+  messageId: string; // ID der gelesenen Nachricht
+  readAt: string; // Lesezeitpunkt
 }
 
 export type P2PMessage =
@@ -107,7 +127,9 @@ export type P2PMessage =
   | StateHashMessage
   | PatchMessage
   | AckMessage
-  | ChatMessage;
+  | ChatMessage
+  | ChatDeliveryMessage
+  | ChatReadMessage;
 
 // Standard-Felder der AddressCard (für UI und Validierung)
 export const ADDRESS_CARD_FIELDS = [

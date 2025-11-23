@@ -110,21 +110,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const sendChatMessage = async (connectionId: string, text: string) => {
     const manager = getP2PManager();
-    if (!manager) return;
+    const connection = appState.connections[connectionId];
+    const now = new Date().toISOString();
+    const messageId = crypto.randomUUID();
 
     const chatMessage: ChatMessage = {
       type: 'CHAT',
-      id: crypto.randomUUID(),
+      id: messageId,
       text,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
+      sentAt: now,
       senderId: appState.myCard.id
     };
 
-    try {
-      await manager.sendMessage(connectionId, chatMessage);
-    } catch (error) {
-      console.error('Failed to send chat message:', error);
-      throw error;
+    // Prüfe ob Peer online ist
+    const isOnline = connection && connection.status === 'online';
+
+    // Update lokale Message mit Status
+    store.updateDoc('Update message status', (doc) => {
+      if (doc.messages) {
+        const message = doc.messages.find(m => m.id === messageId);
+        if (message) {
+          message.deliveryStatus = isOnline ? 'sent' : 'pending';
+          if (!isOnline) {
+            // Füge zu pending queue hinzu
+            if (!doc.pendingMessages) doc.pendingMessages = [];
+            doc.pendingMessages.push(message);
+          }
+        }
+      }
+    });
+
+    if (isOnline && manager) {
+      try {
+        await manager.sendMessage(connectionId, chatMessage);
+        // Update status zu 'sent'
+        store.updateDoc('Message sent', (doc) => {
+          const message = doc.messages?.find(m => m.id === messageId);
+          if (message) {
+            message.deliveryStatus = 'sent';
+          }
+        });
+      } catch (error) {
+        console.error('Failed to send chat message:', error);
+        // Setze zu pending bei Fehler
+        store.updateDoc('Message failed, set pending', (doc) => {
+          const message = doc.messages?.find(m => m.id === messageId);
+          if (message) {
+            message.deliveryStatus = 'pending';
+            if (!doc.pendingMessages) doc.pendingMessages = [];
+            if (!doc.pendingMessages.find(m => m.id === messageId)) {
+              doc.pendingMessages.push(message);
+            }
+          }
+        });
+        throw error;
+      }
     }
   };
 

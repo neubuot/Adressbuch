@@ -199,6 +199,36 @@
   background: #d32f2f;
 }
 
+.delivery-status {
+  font-size: 0.75rem;
+  color: #666;
+  margin-left: 0.5rem;
+}
+
+.delivery-status.pending {
+  color: #ff9800;
+}
+
+.delivery-status.sent {
+  color: #4CAF50;
+}
+
+.delivery-status.delivered {
+  color: #4CAF50;
+}
+
+.delivery-status.read {
+  color: #2196F3;
+}
+
+.message-timestamps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: #666;
+}
+
 .empty-state {
   text-align: center;
   padding: 3rem 1rem;

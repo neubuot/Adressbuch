@@ -34,6 +34,7 @@ export class AutomergeStore {
       tags: {},
       knownPeers: [],
       messages: [],
+      pendingMessages: [],
     };
     this.doc = Automerge.from(initialState as Record<string, unknown>) as Automerge.Doc<AppState>;
   }
@@ -68,6 +69,14 @@ export class AutomergeStore {
         if (!this.doc.messages) {
           this.doc = Automerge.change(this.doc, 'Add messages field', (doc) => {
             doc.messages = [];
+          });
+          await this.save();
+        }
+
+        // Migration: Füge pendingMessages-Feld hinzu falls es nicht existiert
+        if (!this.doc.pendingMessages) {
+          this.doc = Automerge.change(this.doc, 'Add pendingMessages field', (doc) => {
+            doc.pendingMessages = [];
           });
           await this.save();
         }

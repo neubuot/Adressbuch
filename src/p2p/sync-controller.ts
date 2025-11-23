@@ -16,6 +16,8 @@ import type {
   PatchMessage,
   AckMessage,
   ChatMessage,
+  ChatDeliveryMessage,
+  ChatReadMessage,
   Message,
 } from '../types';
 
@@ -115,6 +117,12 @@ export class SyncController {
       case 'CHAT':
         this.handleChat(message as ChatMessage);
         break;
+      case 'CHAT_DELIVERY':
+        this.handleChatDelivery(message as ChatDeliveryMessage);
+        break;
+      case 'CHAT_READ':
+        this.handleChatRead(message as ChatReadMessage);
+        break;
       default:
         console.warn(`Unbekannter Nachrichtentyp: ${(message as P2PMessage).type}`);
     }
@@ -125,6 +133,7 @@ export class SyncController {
    */
   private handleChat(message: ChatMessage): void {
     const connectionId = this.getConnectionId();
+    const now = new Date().toISOString();
 
     // Erstelle Message für lokalen Store
     const localMessage: Message = {
@@ -133,6 +142,9 @@ export class SyncController {
       text: message.text,
       type: 'received',
       timestamp: message.timestamp,
+      sentAt: message.sentAt,
+      deliveredAt: now,
+      deliveryStatus: 'delivered',
       read: false
     };
 
@@ -150,7 +162,43 @@ export class SyncController {
       }
     });
 
+    // Sende Delivery-Receipt zurück
+    const deliveryReceipt: ChatDeliveryMessage = {
+      type: 'CHAT_DELIVERY',
+      messageId: message.id,
+      deliveredAt: now
+    };
+    this.peerConnection.send(deliveryReceipt);
+
     console.log(`💬 Chat-Nachricht empfangen von ${connectionId.substring(0, 8)}`);
+  }
+
+  /**
+   * Verarbeitet Delivery-Receipt
+   */
+  private handleChatDelivery(message: ChatDeliveryMessage): void {
+    store.updateDoc('Update message delivery status', (doc) => {
+      const msg = doc.messages?.find(m => m.id === message.messageId);
+      if (msg && msg.type === 'sent') {
+        msg.deliveredAt = message.deliveredAt;
+        msg.deliveryStatus = 'delivered';
+      }
+    });
+    console.log(`✓ Zustellbestätigung für Nachricht ${message.messageId.substring(0, 8)}`);
+  }
+
+  /**
+   * Verarbeitet Read-Receipt
+   */
+  private handleChatRead(message: ChatReadMessage): void {
+    store.updateDoc('Update message read status', (doc) => {
+      const msg = doc.messages?.find(m => m.id === message.messageId);
+      if (msg && msg.type === 'sent') {
+        msg.readAt = message.readAt;
+        msg.deliveryStatus = 'read';
+      }
+    });
+    console.log(`✓✓ Lesebestätigung für Nachricht ${message.messageId.substring(0, 8)}`);
   }
 
   /**

@@ -58,12 +58,18 @@ export function Messages({ onBack }: MessagesProps) {
       return;
     }
 
+    const now = new Date().toISOString();
+    const connection = appState.connections[selectedConnectionId];
+    const isOnline = connection && connection.status === 'online';
+
     const message: Message = {
       id: crypto.randomUUID(),
       connectionId: selectedConnectionId,
       text: messageText.trim(),
       type: 'sent',
-      timestamp: new Date().toISOString(),
+      timestamp: now,
+      sentAt: now,
+      deliveryStatus: isOnline ? 'pending' : 'pending',
       read: true
     };
 
@@ -72,13 +78,13 @@ export function Messages({ onBack }: MessagesProps) {
       addMessage(message);
       console.log('💬 Nachricht lokal gespeichert:', message);
 
-      // Send via P2P if connection is online
-      const connection = appState.connections[selectedConnectionId];
-      if (connection && connection.status === 'online') {
-        await sendChatMessage(selectedConnectionId, messageText.trim());
+      // Send via P2P (will update status automatically)
+      await sendChatMessage(selectedConnectionId, messageText.trim());
+
+      if (isOnline) {
         console.log('📤 Nachricht via P2P gesendet');
       } else {
-        console.warn('⚠️ Connection nicht online, Nachricht nur lokal gespeichert');
+        console.warn('⏳ Peer offline - Nachricht in Queue');
       }
 
       // Clear input
@@ -104,6 +110,21 @@ export function Messages({ onBack }: MessagesProps) {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  const getDeliveryStatusIcon = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return '⏳';
+      case 'sent':
+        return '✓';
+      case 'delivered':
+        return '✓✓';
+      case 'read':
+        return '✓✓✓';
+      default:
+        return '';
+    }
   };
 
   const getConnectionName = (connectionId: string) => {
@@ -217,10 +238,21 @@ export function Messages({ onBack }: MessagesProps) {
                 <div className="message-header">
                   <span className="message-peer">
                     {msg.type === 'sent' ? '→' : '←'} {getConnectionName(msg.connectionId)}
+                    {msg.type === 'sent' && (
+                      <span className={`delivery-status ${msg.deliveryStatus}`}>
+                        {getDeliveryStatusIcon(msg.deliveryStatus)}
+                      </span>
+                    )}
                   </span>
-                  <span className="message-timestamp">
-                    {formatTimestamp(msg.timestamp)}
-                  </span>
+                  <div className="message-timestamps">
+                    <span>Gesendet: {formatTimestamp(msg.sentAt)}</span>
+                    {msg.deliveredAt && (
+                      <span>Empfangen: {formatTimestamp(msg.deliveredAt)}</span>
+                    )}
+                    {msg.readAt && (
+                      <span>Gelesen: {formatTimestamp(msg.readAt)}</span>
+                    )}
+                  </div>
                 </div>
                 <div className="message-text">{msg.text}</div>
                 <div className="message-footer">
