@@ -35,22 +35,42 @@ Eine moderne, dezentrale Adressbuch-Anwendung als Progressive Web App (PWA) mit 
    cd Adressbuch
    ```
 
-2. **Lokalen Server starten:**
-
-   Mit Python 3:
+2. **Abhängigkeiten installieren:**
    ```bash
-   python3 -m http.server 8000
+   npm install
    ```
 
-   Oder mit Node.js (npx):
+3. **Entwicklungsserver starten:**
    ```bash
-   npx serve
+   npm run dev
    ```
 
-3. **App öffnen:**
+4. **App öffnen:**
    ```
-   http://localhost:8000
+   http://localhost:3000
    ```
+
+### Weitere Befehle
+
+```bash
+# Produktions-Build erstellen
+npm run build
+
+# Build testen
+npm run preview
+
+# Tests ausführen
+npm test
+
+# Tests mit UI ausführen
+npm run test:ui
+
+# Test-Coverage generieren
+npm run test:coverage
+
+# TypeScript Typ-Prüfung
+npm run type-check
+```
 
 ### Als PWA installieren
 
@@ -90,10 +110,12 @@ Eine moderne, dezentrale Adressbuch-Anwendung als Progressive Web App (PWA) mit 
 ## 🔧 Technische Details
 
 ### Technologie-Stack
+- **TypeScript** - Typsicherer Code
+- **Vite** - Schneller Build-Tool und Dev-Server
+- **Vitest** - Unit Testing Framework
 - **HTML5** - Struktur
 - **CSS3** - Styling mit CSS Custom Properties
-- **Vanilla JavaScript** - Keine Frameworks/Bibliotheken
-- **Service Worker API** - Offline-Funktionalität
+- **Service Worker API** - Offline-Funktionalität (via vite-plugin-pwa)
 - **LocalStorage API** - Datenspeicherung
 - **Web App Manifest** - PWA-Installation
 
@@ -125,21 +147,46 @@ importAddressBookData(data);
 
 ```
 Adressbuch/
-├── index.html          # Hauptdatei
-├── styles.css          # Styling
-├── app.js              # JavaScript-Logik
-├── sw.js               # Service Worker
-├── manifest.json       # PWA-Manifest
-├── icon-192.png        # App-Icon (192x192)
-├── icon-512.png        # App-Icon (512x512)
-├── LICENSE             # Lizenz
-└── README.md           # Diese Datei
+├── src/
+│   ├── components/          # UI-Komponenten
+│   │   ├── ContactsUI.ts   # Kontakt-UI
+│   │   └── MessagesUI.ts   # Nachrichten-UI
+│   ├── services/            # Business Logic Services
+│   │   ├── contacts.ts     # Kontaktverwaltung
+│   │   ├── messages.ts     # Nachrichtenverwaltung
+│   │   ├── storage.ts      # LocalStorage Service
+│   │   ├── pwa.ts          # PWA Setup
+│   │   └── dataSync.ts     # Import/Export
+│   ├── types/               # TypeScript Typdefinitionen
+│   │   └── index.ts
+│   ├── utils/               # Hilfsfunktionen
+│   │   └── dom.ts
+│   ├── main.ts              # App-Einstiegspunkt
+│   └── styles.css           # Styling
+├── public/                  # Statische Assets
+│   ├── manifest.json       # PWA-Manifest
+│   ├── sw.js               # Service Worker
+│   ├── icon-192.png        # App-Icon (192x192)
+│   └── icon-512.png        # App-Icon (512x512)
+├── tests/                   # Unit Tests
+│   ├── setup.ts
+│   ├── services/
+│   │   └── storage.test.ts
+│   └── utils/
+│       └── dom.test.ts
+├── index.html              # HTML-Einstiegspunkt
+├── vite.config.ts          # Vite-Konfiguration
+├── vitest.config.ts        # Test-Konfiguration
+├── tsconfig.json           # TypeScript-Konfiguration
+├── package.json            # NPM-Dependencies
+├── LICENSE                 # Lizenz
+└── README.md               # Diese Datei
 ```
 
 ## 🎨 Anpassungen
 
 ### Theme-Farben ändern
-In `styles.css` die CSS-Variablen anpassen:
+In `src/styles.css` die CSS-Variablen anpassen:
 
 ```css
 :root {

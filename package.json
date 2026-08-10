@@ -1,0 +1,42 @@
+{
+  "name": "adressbuch-pwa",
+  "version": "1.0.0",
+  "description": "Dezentrale Adressbuch-Anwendung als Progressive Web App (PWA) mit P2P-Messaging",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "idb": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "@vitest/ui": "^1.2.0",
+    "eslint": "^8.56.0",
+    "happy-dom": "^13.3.5",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.11",
+    "vite-plugin-pwa": "^0.17.4",
+    "vitest": "^1.2.0",
+    "workbox-window": "^7.0.0"
+  },
+  "keywords": [
+    "pwa",
+    "addressbook",
+    "p2p",
+    "messaging",
+    "decentralized",
+    "offline-first"
+  ],
+  "author": "",
+  "license": "MIT"
+}
