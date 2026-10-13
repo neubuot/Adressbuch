@@ -1,5 +1,7 @@
 # 📒 Dezentrales Adressbuch - Progressive Web App
 
+[![Doichain Seal](https://doi-api.sendlabs.de/seal/github/neubuot/Adressbuch/seal.svg)](https://doi-api.sendlabs.de/seal/github/neubuot/Adressbuch)
+
 Eine moderne, dezentrale Adressbuch-Anwendung als Progressive Web App (PWA) mit integriertem P2P-Messaging-System.
 
 ## ✨ Features
