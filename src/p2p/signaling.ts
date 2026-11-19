@@ -1,5 +1,10 @@
 /**
- * WebSocket-Signaling-Client
+ * WebSocket-Client für den Vermittlungsdienst (Signaling).
+ *
+ * Der Dienst vermittelt nur den Verbindungsaufbau zwischen zwei Geräten;
+ * Kontaktdaten laufen nie darüber. Der Client hält die Verbindung selbst
+ * aufrecht: Er verbindet sich nach Abbrüchen erneut und tritt allen Räumen
+ * wieder bei, damit die Oberfläche sich darum nicht kümmern muss.
  */
 
 export type SignalingEventType =
@@ -15,13 +20,20 @@ export interface SignalingEvent {
   [key: string]: unknown;
 }
 
+export type SignalingStatus = 'connecting' | 'online' | 'offline';
+
+const MAX_RECONNECT_DELAY_MS = 30000;
+
 export class SignalingClient {
   private ws: WebSocket | null = null;
   private peerId: string;
   private listeners: Map<SignalingEventType, Array<(event: SignalingEvent) => void>> = new Map();
+  private statusListeners: Array<(status: SignalingStatus) => void> = [];
   private reconnectTimer: number | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private rooms = new Set<string>();
+  private stopped = false;
+  private status: SignalingStatus = 'connecting';
 
   constructor(
     private url: string,
@@ -31,109 +43,120 @@ export class SignalingClient {
   }
 
   /**
-   * Verbindet mit dem Signaling-Server
+   * Startet die Verbindung. Schlägt der erste Versuch fehl, wird im
+   * Hintergrund weiter versucht; die App bleibt ohne Dienst benutzbar.
    */
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        this.ws = new WebSocket(this.url);
+  start(): void {
+    this.stopped = false;
+    window.addEventListener('online', this.handleBrowserOnline);
+    this.open();
+  }
 
-        this.ws.onopen = () => {
-          console.log('🔌 Verbunden mit Signaling-Server');
-          this.reconnectAttempts = 0;
+  private handleBrowserOnline = (): void => {
+    if (this.stopped || this.isConnected()) return;
+    this.reconnectAttempts = 0;
+    this.clearReconnectTimer();
+    this.open();
+  };
 
-          // Registriere Peer-ID
-          this.send({
-            type: 'register',
-            peerId: this.peerId,
-          });
+  private open(): void {
+    if (this.stopped) return;
+    this.setStatus(this.status === 'online' ? 'online' : 'connecting');
 
-          resolve();
-        };
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(this.url);
+    } catch (error) {
+      console.warn('Vermittlungsdienst nicht erreichbar', error);
+      this.setStatus('offline');
+      this.scheduleReconnect();
+      return;
+    }
+    this.ws = socket;
 
-        this.ws.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            this.handleMessage(message);
-          } catch (error) {
-            console.error('Fehler beim Parsen der Signaling-Nachricht', error);
-          }
-        };
-
-        this.ws.onerror = (error) => {
-          console.error('WebSocket-Fehler', error);
-          reject(error);
-        };
-
-        this.ws.onclose = () => {
-          console.log('🔌 Verbindung zum Signaling-Server geschlossen');
-          this.attemptReconnect();
-        };
-      } catch (error) {
-        reject(error);
+    socket.onopen = () => {
+      if (this.ws !== socket) return;
+      this.reconnectAttempts = 0;
+      this.sendRaw({ type: 'register', peerId: this.peerId });
+      // Nach jedem (Wieder-)Verbinden allen Räumen erneut beitreten
+      for (const roomCode of this.rooms) {
+        this.sendRaw({ type: 'join-room', roomCode });
       }
-    });
+      this.setStatus('online');
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        this.handleMessage(JSON.parse(event.data));
+      } catch (error) {
+        console.error('Nachricht des Vermittlungsdienstes nicht lesbar', error);
+      }
+    };
+
+    socket.onerror = () => {
+      // onclose folgt immer und übernimmt das erneute Verbinden
+    };
+
+    socket.onclose = () => {
+      if (this.ws !== socket) return;
+      this.ws = null;
+      if (this.stopped) return;
+      this.setStatus('offline');
+      this.scheduleReconnect();
+    };
   }
 
   /**
-   * Trennt die Verbindung
+   * Trennt die Verbindung dauerhaft (kein erneutes Verbinden).
    */
   disconnect(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
+    this.stopped = true;
+    window.removeEventListener('online', this.handleBrowserOnline);
+    this.clearReconnectTimer();
+    const socket = this.ws;
+    this.ws = null;
+    if (socket) {
+      socket.onclose = null;
+      socket.close();
     }
-
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
+    this.setStatus('offline');
   }
 
   /**
-   * Tritt einem Raum bei
+   * Tritt einem Raum bei. Ist der Dienst gerade nicht erreichbar, wird der
+   * Beitritt nachgeholt, sobald die Verbindung steht.
    */
   joinRoom(roomCode: string): void {
-    this.send({
-      type: 'join-room',
-      roomCode,
-    });
-  }
-
-  /**
-   * Verlässt den aktuellen Raum
-   */
-  leaveRoom(): void {
-    this.send({
-      type: 'leave-room',
-    });
-  }
-
-  /**
-   * Sendet ein WebRTC-Signal an einen Peer
-   */
-  sendSignal(targetPeerId: string, signal: unknown): void {
-    this.send({
-      type: 'signal',
-      targetPeerId,
-      signal,
-    });
-  }
-
-  /**
-   * Sendet eine Nachricht an den Server
-   */
-  private send(message: Record<string, unknown>): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message));
-    } else {
-      console.warn('WebSocket nicht verbunden, kann Nachricht nicht senden');
+    if (this.rooms.has(roomCode)) return;
+    this.rooms.add(roomCode);
+    if (this.isConnected()) {
+      this.sendRaw({ type: 'join-room', roomCode });
     }
   }
 
   /**
-   * Verarbeitet eingehende Nachrichten
+   * Verlässt einen Raum.
    */
+  leaveRoom(roomCode: string): void {
+    if (!this.rooms.delete(roomCode)) return;
+    if (this.isConnected()) {
+      this.sendRaw({ type: 'leave-room', roomCode });
+    }
+  }
+
+  /**
+   * Sendet ein WebRTC-Signal an ein anderes Gerät
+   */
+  sendSignal(targetPeerId: string, signal: unknown): void {
+    this.sendRaw({ type: 'signal', targetPeerId, signal });
+  }
+
+  private sendRaw(message: Record<string, unknown>): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    }
+  }
+
   private handleMessage(message: SignalingEvent): void {
     const listeners = this.listeners.get(message.type);
     if (listeners) {
@@ -141,52 +164,56 @@ export class SignalingClient {
     }
   }
 
-  /**
-   * Registriert einen Event-Listener
-   */
   on(type: SignalingEventType, listener: (event: SignalingEvent) => void): () => void {
     if (!this.listeners.has(type)) {
       this.listeners.set(type, []);
     }
-
     this.listeners.get(type)!.push(listener);
 
-    // Rückgabe: Cleanup-Funktion
     return () => {
       const listeners = this.listeners.get(type);
       if (listeners) {
         const index = listeners.indexOf(listener);
-        if (index !== -1) {
-          listeners.splice(index, 1);
-        }
+        if (index !== -1) listeners.splice(index, 1);
       }
     };
   }
 
-  /**
-   * Versucht, die Verbindung wiederherzustellen
-   */
-  private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Maximale Anzahl an Reconnect-Versuchen erreicht');
-      return;
+  onStatus(listener: (status: SignalingStatus) => void): () => void {
+    this.statusListeners.push(listener);
+    return () => {
+      const index = this.statusListeners.indexOf(listener);
+      if (index !== -1) this.statusListeners.splice(index, 1);
+    };
+  }
+
+  getStatus(): SignalingStatus {
+    return this.status;
+  }
+
+  private setStatus(status: SignalingStatus): void {
+    if (this.status === status) return;
+    this.status = status;
+    this.statusListeners.forEach((listener) => listener(status));
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
+  }
 
+  private scheduleReconnect(): void {
+    if (this.stopped || this.reconnectTimer !== null) return;
     this.reconnectAttempts++;
-    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 30000);
-
-    console.log(`Versuche Reconnect in ${delay}ms (Versuch ${this.reconnectAttempts})`);
-
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), MAX_RECONNECT_DELAY_MS);
     this.reconnectTimer = window.setTimeout(() => {
-      this.connect().catch((error) => {
-        console.error('Reconnect fehlgeschlagen', error);
-      });
+      this.reconnectTimer = null;
+      this.open();
     }, delay);
   }
 
-  /**
-   * Gibt an, ob die Verbindung aktiv ist
-   */
   isConnected(): boolean {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }

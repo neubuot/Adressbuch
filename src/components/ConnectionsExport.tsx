@@ -4,6 +4,8 @@
 
 import { useState, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
+import { ADDRESS_CARD_FIELDS } from '../types';
+import { getFieldLabel } from '../utils/policy';
 
 interface ConnectionsExportProps {
   onClose: () => void;
@@ -89,6 +91,7 @@ export const ConnectionsExport: React.FC<ConnectionsExportProps> = ({ onClose })
       'Letzte Synchronisation',
       'Freigegebene Felder',
       'Tags',
+      ...ADDRESS_CARD_FIELDS.map((field) => getFieldLabel(field)),
     ];
 
     const rows = filteredAndSortedConnections.map((conn) => {
@@ -104,6 +107,7 @@ export const ConnectionsExport: React.FC<ConnectionsExportProps> = ({ onClose })
         conn.lastSyncAt ? new Date(conn.lastSyncAt).toLocaleString('de-DE') : '',
         conn.allowedFields.join('; '),
         tags,
+        ...ADDRESS_CARD_FIELDS.map((field) => String(conn.remoteCard?.[field] ?? '')),
       ];
     });
 

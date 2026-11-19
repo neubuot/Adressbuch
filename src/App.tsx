@@ -18,10 +18,11 @@ function AppContent() {
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null);
 
   // Erstelle dynamischen Titel
-  const firstName = appState.myCard.firstName || '';
-  const lastName = appState.myCard.lastName || '';
-  const nameExtension = (firstName || lastName) ? ` von ${firstName} ${lastName}`.trim() : '';
-  const appTitle = `P2P Adressbuch${nameExtension}`;
+  const ownName = [appState.myCard.firstName, appState.myCard.lastName]
+    .map((part) => (part || '').trim())
+    .filter(Boolean)
+    .join(' ');
+  const appTitle = ownName ? `P2P Adressbuch von ${ownName}` : 'P2P Adressbuch';
 
   const renderView = () => {
     switch (currentView) {

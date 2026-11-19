@@ -86,7 +86,7 @@ export class P2PManager {
         this.removeConnection(peerId);
       });
 
-      await this.signalingClient.connect();
+      this.signalingClient.start();
 
       // Auto-Reconnect zu bekannten Peers
       await this.autoReconnect();
@@ -233,6 +233,11 @@ export class P2PManager {
     if (syncController) {
       syncController.destroy(); // Setzt Status automatisch auf 'offline' mit richtiger Connection-ID
       this.syncControllers.delete(peerId);
+      for (const [connectionId, controller] of this.connectionIdToController) {
+        if (controller === syncController) {
+          this.connectionIdToController.delete(connectionId);
+        }
+      }
     }
 
     const pendingConnection = this.pendingConnections.get(peerId);
