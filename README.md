@@ -1,5 +1,7 @@
 # P2P Adressbuch
 
+[![Doichain Seal](https://doi-api.sendlabs.de/seal/github/neubuot/Adressbuch/seal.svg)](https://doi-api.sendlabs.de/seal/github/neubuot/Adressbuch)
+
 Ein Adressbuch, das sich selbst aktuell hält – ohne Konto und ohne zentralen Speicher.
 
 Jeder pflegt nur seine **eigene Karte** und legt für jeden Kontakt einzeln fest, was dieser
