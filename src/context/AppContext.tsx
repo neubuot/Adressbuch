@@ -1,17 +1,24 @@
 /**
- * React Context für globalen App-State
+ * Globaler Zustand der App: Adressbuch, Verbindungsdienst, Rückmeldungen
  */
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { store } from '../store/automerge-store';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { store, type StoreBlock } from '../store/automerge-store';
 import { initP2PManager, getP2PManager } from '../p2p/p2p-manager';
+import type { SignalingStatus } from '../p2p/signaling';
 import type { AppState } from '../types';
 import { getSignalingUrl } from '../config';
 
 interface AppContextValue {
   appState: AppState;
-  refresh: () => void;
-  isInitialized: boolean;
+  /** true, sobald die gespeicherten Daten geladen sind */
+  isLoaded: boolean;
+  /** Grund, warum die Daten nicht verändert werden dürfen */
+  block: StoreBlock;
+  /** Zustand des Dienstes, der Verbindungen zu Kontakten vermittelt */
+  serviceStatus: SignalingStatus;
+  /** Zeigt eine kurze Rückmeldung an */
+  notify: (message: string) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -26,54 +33,65 @@ export const useAppContext = () => {
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [appState, setAppState] = useState<AppState>(store.getDoc());
-  const [isInitialized, setIsInitialized] = useState(false);
-  const initStartedRef = React.useRef(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [block, setBlock] = useState<StoreBlock>(null);
+  const [serviceStatus, setServiceStatus] = useState<SignalingStatus>('connecting');
+  const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
+  const toastTimer = useRef<number | null>(null);
 
   useEffect(() => {
-    // Guard: Verhindere doppelte Initialisierung in React StrictMode
-    if (initStartedRef.current) {
-      return;
-    }
-    initStartedRef.current = true;
+    let cancelled = false;
+    let unsubscribeStatus: (() => void) | null = null;
+
+    const unsubscribeStore = store.onChange((doc) => setAppState(doc));
 
     const init = async () => {
-      // Store laden
       await store.load();
+      if (cancelled) return;
       setAppState(store.getDoc());
+      setBlock(store.getBlock());
+      setIsLoaded(true);
 
-      // P2P-Manager initialisieren
+      if (store.getBlock()) return;
+
+      // Den Browser bitten, die Daten nicht von sich aus zu löschen
+      void navigator.storage?.persist?.().catch(() => undefined);
+
       const manager = initP2PManager({ signalingUrl: getSignalingUrl() });
+      unsubscribeStatus = manager.onServiceStatus(setServiceStatus);
       await manager.init();
-
-      setIsInitialized(true);
+      if (!cancelled) setServiceStatus(manager.getServiceStatus());
     };
 
-    init().catch(console.error);
-
-    // Store-Änderungen abonnieren
-    const unsubscribe = store.onChange((doc) => {
-      setAppState(doc);
+    init().catch((error) => {
+      console.error('Start fehlgeschlagen', error);
+      if (!cancelled) setIsLoaded(true);
     });
 
     return () => {
-      unsubscribe();
-      // Hinweis: destroy() wird nur beim echten Unmount aufgerufen,
-      // nicht bei React StrictMode re-mounts (da initStartedRef.current true bleibt)
-      const manager = getP2PManager();
-      if (manager) {
-        manager.destroy();
-      }
-      initStartedRef.current = false;
+      cancelled = true;
+      unsubscribeStore();
+      unsubscribeStatus?.();
+      getP2PManager()?.destroy();
     };
   }, []);
 
-  const refresh = () => {
-    setAppState(store.getDoc());
-  };
+  const notify = useCallback((message: string) => {
+    if (toastTimer.current !== null) clearTimeout(toastTimer.current);
+    setToast({ id: Date.now(), message });
+    toastTimer.current = window.setTimeout(() => setToast(null), 4500);
+  }, []);
 
   return (
-    <AppContext.Provider value={{ appState, refresh, isInitialized }}>
+    <AppContext.Provider value={{ appState, isLoaded, block, serviceStatus, notify }}>
       {children}
+      <div aria-live="polite" role="status">
+        {toast && (
+          <div className="toast" key={toast.id}>
+            {toast.message}
+          </div>
+        )}
+      </div>
     </AppContext.Provider>
   );
 };

@@ -26,7 +26,7 @@ export interface P2PManagerConfig {
 
 /** Ereignisse für die Oberfläche */
 export type LinkEvent =
-  | { type: 'linked'; connectionId: string; isNew: boolean }
+  | { type: 'linked'; connectionId: string; isNew: boolean; viaInvite: boolean }
   | { type: 'incompatible'; connectionId: string }
   | { type: 'failed'; duringInvite: boolean };
 
@@ -197,7 +197,14 @@ export class P2PManager implements SyncHost {
   private handlePeerInRoom(remoteSessionId: string, roomCode: string): void {
     if (!remoteSessionId || remoteSessionId === this.localSessionId) return;
     if (roomCode) this.sessionRooms.set(remoteSessionId, roomCode);
-    if (this.links.has(remoteSessionId)) return;
+    const existing = this.links.get(remoteSessionId);
+    if (existing) {
+      // Ein bereits verbundener Kontakt öffnet die Einladung: gleich melden
+      if (existing.connectionId && this.invite && roomCode === this.invite.roomCode) {
+        this.emit({ type: 'linked', connectionId: existing.connectionId, isNew: false, viaInvite: true });
+      }
+      return;
+    }
 
     // Genau eine Seite beginnt: die mit der kleineren Sitzungs-ID.
     // So bauen nie beide gleichzeitig eine Verbindung zueinander auf.
@@ -358,7 +365,8 @@ export class P2PManager implements SyncHost {
       this.rejoinAttempts.delete(roomCode);
     });
     if (link.roomCode) this.rejoinAttempts.delete(link.roomCode);
-    this.emit({ type: 'linked', connectionId, isNew });
+    const viaInvite = isNew || (!!this.invite && link.roomCode === this.invite.roomCode);
+    this.emit({ type: 'linked', connectionId, isNew, viaInvite });
   }
 
   onIncompatible(_sessionId: string, connectionId: string): void {
