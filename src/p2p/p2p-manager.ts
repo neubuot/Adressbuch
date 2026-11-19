@@ -46,7 +46,7 @@ interface InviteContext {
   mergeLocalId?: string;
 }
 
-const CONNECT_TIMEOUT_MS = 30000;
+const CONNECT_TIMEOUT_MS = 15000;
 const MAX_REJOIN_DELAY_MS = 60000;
 
 export class P2PManager implements SyncHost {

@@ -62,10 +62,16 @@ export const SharePicker: React.FC<SharePickerProps> = ({ value, onChange, myCar
                 value={option.id}
                 checked={choice === option.id}
                 onChange={() => select(option.id)}
+                aria-labelledby={`${name}-${option.id}-title`}
+                aria-describedby={`${name}-${option.id}-desc`}
               />
               <span className="option-text">
-                <span className="option-title">{option.label}</span>
-                <span className="option-desc">{option.description}</span>
+                <span className="option-title" id={`${name}-${option.id}-title`}>
+                  {option.label}
+                </span>
+                <span className="option-desc" id={`${name}-${option.id}-desc`}>
+                  {option.description}
+                </span>
               </span>
             </label>
           ))}
@@ -93,10 +99,16 @@ export const SharePicker: React.FC<SharePickerProps> = ({ value, onChange, myCar
                         type="checkbox"
                         checked={value.includes(field.key)}
                         onChange={() => toggle(field.key)}
+                        aria-labelledby={`${name}-field-${field.key}-title`}
+                        aria-describedby={`${name}-field-${field.key}-desc`}
                       />
                       <span className="option-text">
-                        <span className="option-title">{field.label}</span>
-                        <span className="option-desc">{myCard[field.key] || 'noch nicht ausgefüllt'}</span>
+                        <span className="option-title" id={`${name}-field-${field.key}-title`}>
+                          {field.label}
+                        </span>
+                        <span className="option-desc" id={`${name}-field-${field.key}-desc`}>
+                          {myCard[field.key] || 'noch nicht ausgefüllt'}
+                        </span>
                       </span>
                     </label>
                   ))}

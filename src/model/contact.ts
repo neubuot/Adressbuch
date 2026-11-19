@@ -140,11 +140,12 @@ export interface UpcomingBirthday {
  * am 1. März gezählt.
  */
 export function daysUntilBirthday(birthday: string, now: Date = new Date()): { inDays: number; date: Date; turns?: number } | null {
-  const match = birthday.match(/^(\d{4}|-{2})-(\d{2})-(\d{2})$/);
+  // Mit Jahr: 1985-11-24, ohne Jahr: --11-24
+  const match = birthday.match(/^(?:(\d{4})-|--)(\d{2})-(\d{2})$/);
   if (!match) return null;
   const month = parseInt(match[2], 10) - 1;
   const day = parseInt(match[3], 10);
-  const year = match[1] === '--' ? undefined : parseInt(match[1], 10);
+  const year = match[1] ? parseInt(match[1], 10) : undefined;
   if (month < 0 || month > 11 || day < 1 || day > 31) return null;
 
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());

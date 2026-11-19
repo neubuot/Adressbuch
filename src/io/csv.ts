@@ -65,8 +65,10 @@ export function parseCsv(text: string): string[][] {
  */
 export function toCsv(rows: string[][]): string {
   const escapeCell = (cell: string) => {
-    // Schutz vor Formeln, die Tabellenprogramme sonst ausführen würden
-    const safe = /^[=+\-@\t\r]/.test(cell) ? `'${cell}` : cell;
+    // Schutz vor Formeln, die Tabellenprogramme sonst ausführen würden.
+    // Telefonnummern wie "+49 170 …" und Zahlen wie "-5" bleiben unverändert.
+    const looksLikeFormula = /^[=@\t\r]/.test(cell) || (/^[+-]/.test(cell) && !/^[+-][\d\s()./-]*$/.test(cell));
+    const safe = looksLikeFormula ? `'${cell}` : cell;
     return `"${safe.replace(/"/g, '""')}"`;
   };
   return '\uFEFF' + rows.map((row) => row.map(escapeCell).join(';')).join('\r\n') + '\r\n';

@@ -26,6 +26,7 @@ export class PeerConnection {
   private listeners: Map<PeerConnectionEventType, Array<(event: PeerConnectionEvent) => void>> =
     new Map();
   private connected = false;
+  private outbox: P2PMessage[] = [];
 
   constructor(
     private peerId: string,
@@ -59,7 +60,11 @@ export class PeerConnection {
 
     this.peer.on('connect', () => {
       this.connected = true;
+      // Zuerst die eigene Begrüßung (über das connect-Ereignis), dann Wartendes
       this.emit('connect', { type: 'connect' });
+      const waiting = this.outbox;
+      this.outbox = [];
+      waiting.forEach((message) => this.sendNow(message));
     });
 
     this.peer.on('data', (data: Uint8Array) => {
@@ -99,12 +104,21 @@ export class PeerConnection {
    * Sendet eine Nachricht an den Peer
    */
   send(message: P2PMessage): void {
-    if (this.peer && this.connected) {
-      try {
-        this.peer.send(new TextEncoder().encode(JSON.stringify(message)));
-      } catch (error) {
-        console.warn('Nachricht konnte nicht gesendet werden', error);
-      }
+    if (!this.peer) return;
+    if (!this.connected) {
+      // Die Gegenseite kann schon senden, bevor die Verbindung hier als
+      // aufgebaut gemeldet ist. Antworten warten so lange, statt verloren zu gehen.
+      if (this.outbox.length < 50) this.outbox.push(message);
+      return;
+    }
+    this.sendNow(message);
+  }
+
+  private sendNow(message: P2PMessage): void {
+    try {
+      this.peer?.send(new TextEncoder().encode(JSON.stringify(message)));
+    } catch (error) {
+      console.warn('Nachricht konnte nicht gesendet werden', error);
     }
   }
 
@@ -113,6 +127,7 @@ export class PeerConnection {
    */
   destroy(): void {
     this.listeners.clear();
+    this.outbox = [];
     if (this.peer) {
       this.peer.destroy();
       this.peer = null;

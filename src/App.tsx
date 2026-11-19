@@ -13,6 +13,10 @@ import { MyCardView } from './views/MyCardView';
 import { MoreView } from './views/MoreView';
 import { TagsView } from './views/TagsView';
 import { ExportView } from './views/ExportView';
+import { NewsView } from './views/NewsView';
+import { ImportView } from './views/ImportView';
+import { BackupView } from './views/BackupView';
+import { countUnseen, getActivitySeenAt } from './model/activity';
 import { OnboardingView } from './views/OnboardingView';
 import { Page } from './ui/Page';
 import './styles/tokens.css';
@@ -26,16 +30,18 @@ export function buildAppTitle(firstName: string | undefined, lastName: string | 
   return name ? `P2P Adressbuch von ${name}` : 'P2P Adressbuch';
 }
 
-type NavId = 'kontakte' | 'karte' | 'mehr';
+type NavId = 'kontakte' | 'aktuelles' | 'karte' | 'mehr';
 
 const NAV: Array<{ id: NavId; label: string; segments: string[] }> = [
   { id: 'kontakte', label: 'Kontakte', segments: [] },
+  { id: 'aktuelles', label: 'Aktuelles', segments: ['aktuelles'] },
   { id: 'karte', label: 'Meine Karte', segments: ['karte'] },
   { id: 'mehr', label: 'Mehr', segments: ['mehr'] },
 ];
 
 function navOf(route: string[]): NavId {
   if (route[0] === 'karte') return 'karte';
+  if (route[0] === 'aktuelles') return 'aktuelles';
   if (route[0] === 'mehr') return 'mehr';
   return 'kontakte';
 }
@@ -55,11 +61,15 @@ function renderView(route: string[]): React.ReactNode {
     case 'verbinden':
       if (second === 'fuer' && third) return <ConnectView key={third} forContactId={third} />;
       return <ConnectView key={second ?? 'neu'} code={second} />;
+    case 'aktuelles':
+      return <NewsView />;
     case 'karte':
       return <MyCardView />;
     case 'mehr':
       if (second === 'tags') return <TagsView />;
       if (second === 'export') return <ExportView />;
+      if (second === 'import') return <ImportView />;
+      if (second === 'sicherung') return <BackupView />;
       return <MoreView />;
     default:
       return (
@@ -76,6 +86,13 @@ function AppContent() {
   const mainRef = useRef<HTMLElement>(null);
   const routeKey = route.join('/');
   const [onboarded, setOnboarded] = useState(false);
+  const [seenAt, setSeenAt] = useState(getActivitySeenAt);
+
+  useEffect(() => {
+    const update = () => setSeenAt(getActivitySeenAt());
+    window.addEventListener('adressbuch:activity-seen', update);
+    return () => window.removeEventListener('adressbuch:activity-seen', update);
+  }, []);
 
   const appTitle = buildAppTitle(appState.myCard.firstName, appState.myCard.lastName);
 
@@ -144,6 +161,7 @@ function AppContent() {
   }
 
   const current = navOf(route);
+  const unseen = current === 'aktuelles' ? 0 : countUnseen(appState.activity, seenAt);
 
   return (
     <div className="shell">
@@ -165,6 +183,12 @@ function AppContent() {
             aria-current={current === item.id ? 'page' : undefined}
           >
             {item.label}
+            {item.id === 'aktuelles' && unseen > 0 && (
+              <span className="badge">
+                {unseen}
+                <span className="visually-hidden"> neue Änderungen</span>
+              </span>
+            )}
           </a>
         ))}
       </nav>
