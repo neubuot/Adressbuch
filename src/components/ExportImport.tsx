@@ -28,7 +28,7 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
   const [selectedFields, setSelectedFields] = useState<string[]>([
     'firstName',
     'lastName',
-    'email',
+    'emailPrivate',
   ]);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
   const [roomCode, setRoomCode] = useState<string>('');
@@ -36,8 +36,8 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
   const availableFields = [
     { key: 'firstName', label: 'Vorname' },
     { key: 'lastName', label: 'Nachname' },
-    { key: 'email', label: 'E-Mail' },
-    { key: 'phone', label: 'Telefon' },
+    { key: 'emailPrivate', label: 'E-Mail' },
+    { key: 'phoneMobile', label: 'Telefon' },
     { key: 'street', label: 'Straße' },
     { key: 'postalCode', label: 'PLZ' },
     { key: 'city', label: 'Stadt' },
@@ -110,8 +110,7 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
       console.log('QR-Code erfolgreich generiert');
 
       // Trete dem Room bei (für automatische Verbindung)
-      manager.setDefaultAllowedFields(selectedFields);
-      manager.joinRoom(code);
+      manager.acceptInvite(code, selectedFields);
     } catch (error) {
       console.error('Fehler beim Generieren des QR-Codes:', error);
     }
@@ -151,8 +150,7 @@ export const ExportImport: React.FC<ExportImportProps> = ({ onClose }) => {
         // Import fremde Karte via QR-Code Daten
         const manager = getP2PManager();
         if (manager && data.roomCode) {
-          manager.setDefaultAllowedFields(selectedFields);
-          manager.joinRoom(data.roomCode);
+          manager.acceptInvite(data.roomCode, selectedFields);
           alert(`Verbindung wird hergestellt mit Raum: ${data.roomCode}`);
         }
       } else {

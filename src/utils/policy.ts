@@ -1,22 +1,26 @@
 /**
- * Policy-Engine für feldgenaue Freigabe
+ * Freigabe-Regeln: Welche Felder der eigenen Karte sieht ein Kontakt?
  */
 
-import type { AddressCard } from '../types';
+import type { AddressCard, RemoteCard } from '../types';
+import { ADDRESS_CARD_FIELDS } from '../types';
+import { isCardField, SHARE_PRESETS } from '../model/fields';
+
+export { getFieldLabel } from '../model/fields';
 
 /**
- * Projiziert eine AddressCard auf erlaubte Felder
- * Gibt nur die Felder zurück, die in der Whitelist stehen
+ * Reduziert die eigene Karte auf die freigegebenen Felder.
+ * Unbekannte Feldnamen und leere Werte werden nicht übertragen.
  */
-export function projectFields(
-  card: AddressCard,
-  allowedFields: string[]
-): Partial<AddressCard> {
-  const result: Partial<AddressCard> = {};
+export function projectFields(card: AddressCard, allowedFields: string[]): RemoteCard {
+  const result: RemoteCard = {};
+  const allowed = new Set(allowedFields);
 
-  for (const field of allowedFields) {
-    if (field in card) {
-      (result as unknown as Record<string, unknown>)[field] = (card as unknown as Record<string, unknown>)[field];
+  for (const field of ADDRESS_CARD_FIELDS) {
+    if (!allowed.has(field)) continue;
+    const value = card[field];
+    if (typeof value === 'string' && value !== '') {
+      result[field] = value;
     }
   }
 
@@ -24,75 +28,30 @@ export function projectFields(
 }
 
 /**
- * Prüft, ob alle Felder in der Policy gültig sind
+ * Prüft, ob eine Freigabe nur bekannte Felder enthält
  */
 export function validatePolicy(allowedFields: string[]): boolean {
-  const validFields = [
-    'id',
-    'firstName',
-    'lastName',
-    'street',
-    'postalCode',
-    'city',
-    'country',
-    'email',
-    'phone',
-    'birthday',
-    'organization',
-    'updatedAt',
-  ];
+  return allowedFields.every((field) => isCardField(field));
+}
 
-  return allowedFields.every((field) => {
-    // Custom-Felder müssen mit 'custom.' beginnen
-    if (field.startsWith('custom.')) {
-      return true;
+/**
+ * Bereinigt eine empfangene Karte: nur bekannte Felder, nur Text, begrenzte Länge.
+ */
+export function sanitizeRemoteCard(fields: unknown): RemoteCard {
+  const result: RemoteCard = {};
+  if (!fields || typeof fields !== 'object') return result;
+
+  for (const field of ADDRESS_CARD_FIELDS) {
+    const value = (fields as Record<string, unknown>)[field];
+    if (typeof value === 'string' && value !== '') {
+      result[field] = value.slice(0, 500);
     }
-    return validFields.includes(field);
-  });
-}
-
-/**
- * Standard-Policies für schnelle Auswahl
- */
-export const POLICY_PRESETS = {
-  none: [],
-  minimal: ['firstName', 'lastName', 'email'],
-  business: ['firstName', 'lastName', 'email', 'phone', 'organization'],
-  address: ['firstName', 'lastName', 'street', 'postalCode', 'city', 'country'],
-  full: [
-    'firstName',
-    'lastName',
-    'street',
-    'postalCode',
-    'city',
-    'country',
-    'email',
-    'phone',
-    'birthday',
-    'organization',
-  ],
-} as const;
-
-/**
- * Gibt lesbare Label für Felder zurück
- */
-export function getFieldLabel(field: string): string {
-  const labels: Record<string, string> = {
-    firstName: 'Vorname',
-    lastName: 'Nachname',
-    street: 'Straße',
-    postalCode: 'PLZ',
-    city: 'Stadt',
-    country: 'Land',
-    email: 'E-Mail',
-    phone: 'Telefon',
-    birthday: 'Geburtstag',
-    organization: 'Organisation',
-  };
-
-  if (field.startsWith('custom.')) {
-    return field.substring(7); // "custom." entfernen
   }
-
-  return labels[field] || field;
+  return result;
 }
+
+export const POLICY_PRESETS: Record<string, readonly string[]> = {
+  none: [],
+  ...Object.fromEntries(SHARE_PRESETS.map((preset) => [preset.id, preset.fields])),
+  full: ADDRESS_CARD_FIELDS,
+};

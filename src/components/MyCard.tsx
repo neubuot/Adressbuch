@@ -83,8 +83,8 @@ export const MyCard: React.FC<MyCardProps> = ({ onBack }) => {
             <input
               id="email"
               type="email"
-              value={formData.email}
-              onChange={(e) => handleChange('email', e.target.value)}
+              value={formData.emailPrivate}
+              onChange={(e) => handleChange('emailPrivate', e.target.value)}
             />
           </div>
 
@@ -93,8 +93,8 @@ export const MyCard: React.FC<MyCardProps> = ({ onBack }) => {
             <input
               id="phone"
               type="tel"
-              value={formData.phone}
-              onChange={(e) => handleChange('phone', e.target.value)}
+              value={formData.phoneMobile}
+              onChange={(e) => handleChange('phoneMobile', e.target.value)}
             />
           </div>
 

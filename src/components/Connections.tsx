@@ -48,8 +48,7 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
       const manager = getP2PManager();
       if (manager) {
         // Setze Standard-Freigabe bevor wir beitreten
-        manager.setDefaultAllowedFields(newConnectionFields);
-        manager.joinRoom(joinCode.trim().toUpperCase());
+        manager.acceptInvite(joinCode, newConnectionFields);
         setJoinCode('');
         setShowJoin(false);
         alert(`Raum beigetreten: ${joinCode.trim()}`);
@@ -124,7 +123,7 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
       const query = searchQuery.toLowerCase();
       const label = (conn.label || '').toLowerCase();
       const id = conn.id.toLowerCase();
-      const email = (conn.remoteCard?.email || '').toLowerCase();
+      const email = (conn.remoteCard?.emailPrivate || '').toLowerCase();
       const name = [conn.remoteCard?.firstName, conn.remoteCard?.lastName]
         .filter(Boolean)
         .join(' ')
@@ -490,8 +489,8 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
                       {(connection.remoteCard.firstName || connection.remoteCard.lastName) && (
                         <div><strong>Name:</strong> {[connection.remoteCard.firstName, connection.remoteCard.lastName].filter(Boolean).join(' ')}</div>
                       )}
-                      {connection.remoteCard.email && <div><strong>E-Mail:</strong> {connection.remoteCard.email}</div>}
-                      {connection.remoteCard.phone && <div><strong>Telefon:</strong> {connection.remoteCard.phone}</div>}
+                      {connection.remoteCard.emailPrivate && <div><strong>E-Mail:</strong> {connection.remoteCard.emailPrivate}</div>}
+                      {connection.remoteCard.phoneMobile && <div><strong>Telefon:</strong> {connection.remoteCard.phoneMobile}</div>}
                       {connection.remoteCard.street && <div><strong>Straße:</strong> {connection.remoteCard.street}</div>}
                       {(connection.remoteCard.postalCode || connection.remoteCard.city) && (
                         <div><strong>PLZ/Ort:</strong> {[connection.remoteCard.postalCode, connection.remoteCard.city].filter(Boolean).join(' ')}</div>
@@ -690,9 +689,9 @@ export const Connections: React.FC<ConnectionsProps> = ({ onBack, onEditPolicy }
                                 .join(' ')}
                             </div>
                           )}
-                          {connection.remoteCard.email && (
+                          {connection.remoteCard.emailPrivate && (
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                              {connection.remoteCard.email}
+                              {connection.remoteCard.emailPrivate}
                             </div>
                           )}
                         </div>

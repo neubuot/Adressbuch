@@ -1,11 +1,22 @@
 /**
- * P2P-Manager: Verwaltet alle Peer-Verbindungen
+ * P2P-Manager: verwaltet die direkten Verbindungen zu allen Kontakten.
+ *
+ * Die Oberfläche muss sich um nichts kümmern: Der Manager verbindet sich beim
+ * Start mit allen bekannten Kontakten, baut abgebrochene Verbindungen wieder
+ * auf und überträgt Änderungen an Karte oder Freigabe von selbst.
  */
 
-import { SignalingClient } from './signaling';
+import { SignalingClient, type SignalingStatus } from './signaling';
 import { PeerConnection } from './peer-connection';
-import { SyncController } from './sync-controller';
-import { getOrCreateKeyPair, generatePeerId, createFingerprint, generatePersistentRoomCode } from '../utils/crypto';
+import { SyncController, type ContactDecision, type SyncHost } from './sync-controller';
+import {
+  getOrCreateKeyPair,
+  generatePeerId,
+  createFingerprint,
+  generatePersistentRoomCode,
+  generateConnectionCode,
+  normalizeConnectionCode,
+} from '../utils/crypto';
 import { store } from '../store/automerge-store';
 import type { SignalData } from 'simple-peer';
 
@@ -13,84 +24,109 @@ export interface P2PManagerConfig {
   signalingUrl: string;
 }
 
-export class P2PManager {
+/** Ereignisse für die Oberfläche */
+export type LinkEvent =
+  | { type: 'linked'; connectionId: string; isNew: boolean }
+  | { type: 'incompatible'; connectionId: string }
+  | { type: 'failed'; duringInvite: boolean };
+
+interface Link {
+  sessionId: string;
+  peer: PeerConnection;
+  controller: SyncController;
+  roomCode?: string;
+  connectionId?: string;
+  connectTimer: number | null;
+}
+
+interface InviteContext {
+  roomCode: string;
+  fields: string[];
+  /** Importierter Eintrag, der in diese Verbindung übergehen soll */
+  mergeLocalId?: string;
+}
+
+const CONNECT_TIMEOUT_MS = 30000;
+const MAX_REJOIN_DELAY_MS = 60000;
+
+export class P2PManager implements SyncHost {
   private signalingClient: SignalingClient | null = null;
   private localSessionId: string;
-  private localPubKey: string = '';
-  private syncControllers: Map<string, SyncController> = new Map(); // Session-ID → SyncController
-  private connectionIdToController: Map<string, SyncController> = new Map(); // Connection-ID (Fingerprint) → SyncController
-  private pendingConnections: Map<string, PeerConnection> = new Map();
-  private defaultAllowedFields: string[] = []; // Felder für neue Connections
+  localPubKey = '';
+  localPrivateKey = '';
+  private localFingerprint = '';
+  private links: Map<string, Link> = new Map(); // Sitzungs-ID → Verbindung
+  private sessionRooms: Map<string, string> = new Map(); // Sitzungs-ID → Raum
+  private persistentRooms: Map<string, string> = new Map(); // Kontakt-ID → Raum
+  private rejoinAttempts: Map<string, number> = new Map();
+  private rejoinTimers: Map<string, number> = new Map();
+  private invite: InviteContext | null = null;
+  private linkListeners: Array<(event: LinkEvent) => void> = [];
+  private statusListeners: Array<(status: SignalingStatus) => void> = [];
+  private unsubscribeStore: (() => void) | null = null;
+  private syncTimer: number | null = null;
   private isInitialized = false;
   private isInitializing = false;
+  private destroyed = false;
 
   constructor(private config: P2PManagerConfig) {
-    // Session-ID ist zufällig (pro Tab/Session)
+    // Die Sitzungs-ID gilt nur für diesen Start der App
     this.localSessionId = generatePeerId();
   }
 
   /**
-   * Setzt die Standard-Freigabefelder für neue Connections
-   */
-  setDefaultAllowedFields(fields: string[]): void {
-    this.defaultAllowedFields = fields;
-    console.log(`📋 Standard-Freigabe gesetzt:`, fields);
-  }
-
-  /**
-   * Gibt die Standard-Freigabefelder zurück
-   */
-  getDefaultAllowedFields(): string[] {
-    return this.defaultAllowedFields;
-  }
-
-  /**
-   * Initialisiert den P2P-Manager
+   * Startet den Manager. Schlägt nicht fehl, wenn der Vermittlungsdienst
+   * gerade nicht erreichbar ist; die Verbindung wird im Hintergrund aufgebaut.
    */
   async init(): Promise<void> {
-    // Guard: Verhindere doppelte Initialisierung
-    if (this.isInitialized) {
-      console.log('⚠️ P2PManager bereits initialisiert, überspringe');
-      return;
-    }
-
-    if (this.isInitializing) {
-      console.log('⚠️ P2PManager wird bereits initialisiert, überspringe');
-      return;
-    }
-
+    if (this.isInitialized || this.isInitializing) return;
     this.isInitializing = true;
 
     try {
-      // Keypair laden/erstellen
       const keyPair = await getOrCreateKeyPair();
       this.localPubKey = keyPair.publicKey;
+      this.localPrivateKey = keyPair.privateKey;
+      this.localFingerprint = await createFingerprint(this.localPubKey);
+      if (this.destroyed) return;
 
-      // Signaling-Client verbinden (verwendet Session-ID)
-      this.signalingClient = new SignalingClient(this.config.signalingUrl, this.localSessionId);
+      const signaling = new SignalingClient(this.config.signalingUrl, this.localSessionId);
+      this.signalingClient = signaling;
 
-      this.signalingClient.on('peer-joined', (event) => {
-        const remotePeerId = event.peerId as string;
-        this.initiateConnection(remotePeerId);
+      signaling.on('room-joined', (event) => {
+        const roomCode = String(event.roomCode ?? '');
+        const peers = Array.isArray(event.peers) ? (event.peers as unknown[]) : [];
+        for (const peerId of peers) {
+          this.handlePeerInRoom(String(peerId), roomCode);
+        }
       });
 
-      this.signalingClient.on('signal', (event) => {
-        const signal = event.signal as SignalData;
-        const fromPeerId = event.fromPeerId as string;
-        this.handleSignal(fromPeerId, signal);
+      signaling.on('peer-joined', (event) => {
+        this.handlePeerInRoom(String(event.peerId ?? ''), String(event.roomCode ?? ''));
       });
 
-      this.signalingClient.on('peer-left', (event) => {
-        const peerId = event.peerId as string;
-        console.log(`👋 Peer verlassen: ${peerId}`);
-        this.removeConnection(peerId);
+      signaling.on('signal', (event) => {
+        this.handleSignal(String(event.fromPeerId ?? ''), event.signal as SignalData);
       });
 
-      this.signalingClient.start();
+      signaling.on('peer-left', (event) => {
+        // Nur Verbindungsversuche abbrechen, die noch nicht stehen. Eine
+        // bestehende direkte Verbindung braucht den Vermittlungsdienst nicht.
+        const link = this.links.get(String(event.peerId ?? ''));
+        if (link && !link.peer.isConnected()) {
+          this.teardown(link.sessionId, false);
+        }
+      });
 
-      // Auto-Reconnect zu bekannten Peers
-      await this.autoReconnect();
+      signaling.onStatus((status) => {
+        this.statusListeners.forEach((listener) => listener(status));
+      });
 
+      signaling.start();
+
+      // Karte oder Freigabe geändert? Dann von selbst übertragen.
+      this.unsubscribeStore = store.onChange(() => this.scheduleSync());
+
+      await this.joinKnownContacts();
       this.isInitialized = true;
     } finally {
       this.isInitializing = false;
@@ -98,244 +134,366 @@ export class P2PManager {
   }
 
   /**
-   * Versucht automatisch zu allen bekannten Peers zu reconnecten
+   * Betritt für jeden verbundenen Kontakt den gemeinsamen, dauerhaften Raum
    */
-  private async autoReconnect(): Promise<void> {
-    const doc = store.getDoc();
-    const connections = Object.values(doc.connections);
-
-    if (connections.length === 0) {
-      return;
-    }
-
-    console.log(`🔄 Auto-Reconnect: Verbinde zu ${connections.length} bekannten Peer(s)...`);
-
-    const myFingerprint = await createFingerprint(this.localPubKey);
-
+  private async joinKnownContacts(): Promise<void> {
+    const connections = Object.values(store.getDoc().connections);
     for (const connection of connections) {
-      try {
-        // Berechne persistenten Room-Code aus beiden Fingerprints
-        const roomCode = await generatePersistentRoomCode(myFingerprint, connection.id);
-
-        // Tritt dem persistenten Room bei
-        this.joinRoom(roomCode);
-      } catch (error) {
-        console.error(`❌ Fehler beim Auto-Reconnect zu ${connection.id}:`, error);
-      }
+      if (connection.kind === 'local') continue;
+      await this.joinPersistentRoom(connection.id);
     }
   }
 
-  /**
-   * Tritt einem Raum bei (via Verbindungscode)
-   */
-  joinRoom(roomCode: string): void {
-    if (this.signalingClient) {
-      this.signalingClient.joinRoom(roomCode);
+  private async joinPersistentRoom(connectionId: string): Promise<string> {
+    let roomCode = this.persistentRooms.get(connectionId);
+    if (!roomCode) {
+      roomCode = await generatePersistentRoomCode(this.localFingerprint, connectionId);
+      this.persistentRooms.set(connectionId, roomCode);
     }
+    this.signalingClient?.joinRoom(roomCode);
+    return roomCode;
+  }
+
+  // --- Einladungen ---
+
+  /**
+   * Öffnet eine Einladung und gibt den Code zurück, den die andere Person
+   * braucht. Solange die Einladung offen ist, kann sich genau über diesen
+   * Code ein neuer Kontakt verbinden.
+   */
+  startInvite(fields: string[], mergeLocalId?: string): string {
+    this.endInvite();
+    const roomCode = generateConnectionCode();
+    this.invite = { roomCode, fields: [...fields], mergeLocalId };
+    this.signalingClient?.joinRoom(roomCode);
+    return roomCode;
   }
 
   /**
-   * Erstellt eine ausgehende Verbindung zu einem Peer
+   * Nimmt eine Einladung an (Code der anderen Person)
    */
-  private initiateConnection(remotePeerId: string): void {
-    // Guard: Verhindere doppelte Verbindungen zur gleichen Session-ID
-    if (this.pendingConnections.has(remotePeerId) || this.syncControllers.has(remotePeerId)) {
-      return; // Bereits verbunden oder Verbindung läuft
+  acceptInvite(code: string, fields: string[], mergeLocalId?: string): string {
+    this.endInvite();
+    const roomCode = normalizeConnectionCode(code);
+    this.invite = { roomCode, fields: [...fields], mergeLocalId };
+    this.signalingClient?.joinRoom(roomCode);
+    return roomCode;
+  }
+
+  /** Ändert die Freigabe für den Kontakt, der über die offene Einladung entsteht */
+  setInviteFields(fields: string[]): void {
+    if (this.invite) this.invite.fields = [...fields];
+  }
+
+  /** Schließt die offene Einladung */
+  endInvite(): void {
+    if (!this.invite) return;
+    this.signalingClient?.leaveRoom(this.invite.roomCode);
+    this.invite = null;
+  }
+
+  // --- Verbindungsaufbau ---
+
+  private handlePeerInRoom(remoteSessionId: string, roomCode: string): void {
+    if (!remoteSessionId || remoteSessionId === this.localSessionId) return;
+    if (roomCode) this.sessionRooms.set(remoteSessionId, roomCode);
+    if (this.links.has(remoteSessionId)) return;
+
+    // Genau eine Seite beginnt: die mit der kleineren Sitzungs-ID.
+    // So bauen nie beide gleichzeitig eine Verbindung zueinander auf.
+    if (this.localSessionId < remoteSessionId) {
+      this.createLink(remoteSessionId, true);
+    }
+  }
+
+  private handleSignal(fromSessionId: string, signal: SignalData): void {
+    if (!fromSessionId || !signal) return;
+    let link = this.links.get(fromSessionId);
+
+    const isOffer = (signal as { type?: string }).type === 'offer';
+    if (link && isOffer && link.peer.isConnected()) {
+      // Die Gegenseite beginnt neu: alte, auf ihrer Seite bereits beendete
+      // Verbindung verwerfen.
+      this.teardown(fromSessionId, false);
+      link = undefined;
     }
 
-    const peerConnection = new PeerConnection(remotePeerId, true);
+    if (!link) {
+      if (!isOffer) return;
+      link = this.createLink(fromSessionId, false);
+    }
+    link.peer.signal(signal);
+  }
 
-    peerConnection.on('signal', (event) => {
-      if (this.signalingClient) {
-        this.signalingClient.sendSignal(remotePeerId, event.data);
-      }
+  private createLink(remoteSessionId: string, initiator: boolean): Link {
+    const peer = new PeerConnection(remoteSessionId, initiator);
+    // Der Abgleich lauscht von Anfang an, damit keine Nachricht verloren geht
+    const controller = new SyncController(remoteSessionId, peer, this);
+    const link: Link = {
+      sessionId: remoteSessionId,
+      peer,
+      controller,
+      roomCode: this.sessionRooms.get(remoteSessionId),
+      connectTimer: null,
+    };
+
+    peer.on('signal', (event) => {
+      this.signalingClient?.sendSignal(remoteSessionId, event.data);
     });
-
-    peerConnection.on('connect', () => {
-      this.setupSyncController(remotePeerId, peerConnection);
+    peer.on('connect', () => {
+      if (link.connectTimer !== null) {
+        clearTimeout(link.connectTimer);
+        link.connectTimer = null;
+      }
+      controller.start();
     });
+    peer.on('close', () => this.teardown(remoteSessionId, true));
+    peer.on('error', () => this.teardown(remoteSessionId, true));
 
-    this.pendingConnections.set(remotePeerId, peerConnection);
-    peerConnection.init();
+    link.connectTimer = window.setTimeout(() => {
+      link.connectTimer = null;
+      if (!peer.isConnected()) this.teardown(remoteSessionId, true);
+    }, CONNECT_TIMEOUT_MS);
+
+    this.links.set(remoteSessionId, link);
+    peer.init();
+    return link;
   }
 
   /**
-   * Verarbeitet eingehendes Signal
+   * Beendet eine Verbindung und sorgt bei Bedarf für einen neuen Versuch
    */
-  private handleSignal(fromPeerId: string, signal: SignalData): void {
-    let peerConnection = this.pendingConnections.get(fromPeerId);
+  private teardown(sessionId: string, retry: boolean): void {
+    const link = this.links.get(sessionId);
+    if (!link) return;
+    this.links.delete(sessionId);
 
-    if (!peerConnection) {
-      // Guard: Verhindere neue Verbindung wenn bereits etabliert
-      if (this.syncControllers.has(fromPeerId)) {
-        return; // Bereits verbunden
-      }
+    if (link.connectTimer !== null) clearTimeout(link.connectTimer);
+    const wasLinked = !!link.connectionId;
+    link.controller.destroy();
 
-      // Eingehende Verbindung: erstelle neue Peer-Verbindung
-      peerConnection = new PeerConnection(fromPeerId, false);
-
-      peerConnection.on('signal', (event) => {
-        if (this.signalingClient) {
-          this.signalingClient.sendSignal(fromPeerId, event.data);
-        }
-      });
-
-      peerConnection.on('connect', () => {
-        this.setupSyncController(fromPeerId, peerConnection!);
-      });
-
-      this.pendingConnections.set(fromPeerId, peerConnection);
-      peerConnection.init();
+    if (link.connectionId) {
+      // Hat derselbe Kontakt noch eine zweite Verbindung (z. B. zweites Fenster)?
+      const other = this.findLink(link.connectionId);
+      if (other) void store.setConnectionStatus(link.connectionId, 'online');
     }
 
-    // Signal weiterleiten
-    peerConnection.signal(signal);
-  }
+    if (this.destroyed || !retry) return;
 
-  /**
-   * Richtet den Sync-Controller für eine Verbindung ein
-   */
-  private setupSyncController(peerId: string, peerConnection: PeerConnection): void {
-    // Verbindung ist bereits hergestellt, daher alreadyConnected = true
-    const syncController = new SyncController(
-      peerId,
-      peerConnection,
-      this.localPubKey,
-      () => this.getDefaultAllowedFields(), // Callback
-      (connectionId: string) => this.registerConnectionId(peerId, connectionId), // Callback für Connection-ID
-      true
-    );
-
-    this.syncControllers.set(peerId, syncController);
-    this.pendingConnections.delete(peerId);
-
-    // HINWEIS: Store-Update erfolgt automatisch im SyncController nach HELLO-Austausch,
-    // wenn die echte Connection-ID (Fingerprint) bekannt ist
-  }
-
-  /**
-   * Registriert die Connection-ID für einen SyncController
-   * Wird vom SyncController aufgerufen, sobald der Fingerprint bekannt ist
-   */
-  private registerConnectionId(sessionId: string, connectionId: string): void {
-    const syncController = this.syncControllers.get(sessionId);
-    if (syncController) {
-      this.connectionIdToController.set(connectionId, syncController);
-      console.log(`🔗 Connection-ID ${connectionId} registriert für Session ${sessionId}`);
-    }
-  }
-
-  /**
-   * Entfernt eine Verbindung
-   */
-  private removeConnection(peerId: string): void {
-    const syncController = this.syncControllers.get(peerId);
-    if (syncController) {
-      syncController.destroy(); // Setzt Status automatisch auf 'offline' mit richtiger Connection-ID
-      this.syncControllers.delete(peerId);
-      for (const [connectionId, controller] of this.connectionIdToController) {
-        if (controller === syncController) {
-          this.connectionIdToController.delete(connectionId);
-        }
-      }
-    }
-
-    const pendingConnection = this.pendingConnections.get(peerId);
-    if (pendingConnection) {
-      pendingConnection.destroy();
-      this.pendingConnections.delete(peerId);
-    }
-
-    // HINWEIS: Store-Update erfolgt automatisch in syncController.destroy()
-    // mit der korrekten Connection-ID (Fingerprint), nicht mit der Session-ID
-  }
-
-  /**
-   * Fügt eine neue Verbindung hinzu
-   */
-  async addConnection(
-    peerId: string,
-    peerPubKey: string,
-    allowedFields: string[]
-  ): Promise<void> {
-    await store.addConnection(peerId, peerPubKey, allowedFields);
-  }
-
-  /**
-   * Triggert Resync für eine Verbindung
-   */
-  async resyncConnection(connectionId: string): Promise<void> {
-    // Suche zuerst mit Connection-ID (Fingerprint)
-    let syncController = this.connectionIdToController.get(connectionId);
-
-    // Fallback: Suche mit Session-ID (für Abwärtskompatibilität)
-    if (!syncController) {
-      syncController = this.syncControllers.get(connectionId);
-    }
-
-    if (syncController) {
-      console.log(`🔄 Resync für Connection ${connectionId}`);
-      await syncController.resync();
+    if (wasLinked && link.connectionId) {
+      this.scheduleRejoin(link.connectionId);
     } else {
-      console.warn(`⚠️ Keine aktive Verbindung für ${connectionId} gefunden`);
+      const duringInvite = !!this.invite && link.roomCode === this.invite.roomCode;
+      this.emit({ type: 'failed', duringInvite });
+      if (link.roomCode) this.scheduleRoomRejoin(link.roomCode);
+    }
+  }
+
+  private findLink(connectionId: string): Link | undefined {
+    for (const link of this.links.values()) {
+      if (link.connectionId === connectionId && link.controller.isReady()) return link;
+    }
+    return undefined;
+  }
+
+  /**
+   * Nach einem Abbruch: den gemeinsamen Raum verlassen und neu betreten.
+   * Das stößt auf beiden Seiten einen neuen Verbindungsaufbau an.
+   */
+  private scheduleRejoin(connectionId: string): void {
+    const connection = store.getDoc().connections[connectionId];
+    if (!connection || connection.kind === 'local') return;
+    const roomCode = this.persistentRooms.get(connectionId);
+    if (roomCode) this.scheduleRoomRejoin(roomCode);
+  }
+
+  private scheduleRoomRejoin(roomCode: string): void {
+    if (this.rejoinTimers.has(roomCode)) return;
+    const attempt = (this.rejoinAttempts.get(roomCode) ?? 0) + 1;
+    this.rejoinAttempts.set(roomCode, attempt);
+    const delay = Math.min(2000 * Math.pow(2, attempt - 1), MAX_REJOIN_DELAY_MS) + Math.random() * 500;
+
+    const timer = window.setTimeout(() => {
+      this.rejoinTimers.delete(roomCode);
+      if (this.destroyed || !this.signalingClient) return;
+      const stillWanted =
+        this.invite?.roomCode === roomCode ||
+        Array.from(this.persistentRooms.entries()).some(
+          ([connectionId, code]) => code === roomCode && !!store.getDoc().connections[connectionId]
+        );
+      if (!stillWanted) return;
+      this.signalingClient.leaveRoom(roomCode);
+      this.signalingClient.joinRoom(roomCode);
+    }, delay);
+    this.rejoinTimers.set(roomCode, timer);
+  }
+
+  // --- Rückfragen des Abgleichs (SyncHost) ---
+
+  async resolveContact(sessionId: string, connectionId: string, pubKey: string): Promise<ContactDecision> {
+    if (connectionId === this.localFingerprint) return 'reject'; // eigenes zweites Fenster
+
+    const existing = store.getDoc().connections[connectionId];
+    if (existing && existing.kind !== 'local') return 'known';
+
+    // Neue Kontakte entstehen nur über eine gerade offene Einladung
+    const link = this.links.get(sessionId);
+    const invite = this.invite;
+    if (!link || !invite || link.roomCode !== invite.roomCode) return 'reject';
+
+    await store.addConnection(connectionId, pubKey, invite.fields);
+    if (invite.mergeLocalId) {
+      await store.mergeLocalIntoLinked(invite.mergeLocalId, connectionId);
+      invite.mergeLocalId = undefined;
+    }
+    return 'new';
+  }
+
+  onLinked(sessionId: string, connectionId: string, isNew: boolean): void {
+    const link = this.links.get(sessionId);
+    if (!link) return;
+    link.connectionId = connectionId;
+
+    void this.joinPersistentRoom(connectionId).then((roomCode) => {
+      this.rejoinAttempts.delete(roomCode);
+    });
+    if (link.roomCode) this.rejoinAttempts.delete(link.roomCode);
+    this.emit({ type: 'linked', connectionId, isNew });
+  }
+
+  onIncompatible(_sessionId: string, connectionId: string): void {
+    this.emit({ type: 'incompatible', connectionId });
+  }
+
+  onRejected(sessionId: string): void {
+    this.teardown(sessionId, false);
+  }
+
+  // --- Automatisches Übertragen ---
+
+  private scheduleSync(): void {
+    if (this.syncTimer !== null) return;
+    this.syncTimer = window.setTimeout(() => {
+      this.syncTimer = null;
+      this.syncAll();
+    }, 100);
+  }
+
+  private syncAll(): void {
+    const connections = store.getDoc().connections;
+    for (const link of Array.from(this.links.values())) {
+      if (!link.connectionId) continue;
+      if (!connections[link.connectionId]) {
+        // Kontakt wurde entfernt: Verbindung beenden und Raum verlassen
+        this.forgetContact(link.connectionId);
+        continue;
+      }
+      link.controller.syncIfChanged();
+    }
+    // Entfernte Kontakte ohne aktive Verbindung ebenfalls vergessen
+    for (const connectionId of Array.from(this.persistentRooms.keys())) {
+      if (!connections[connectionId]) this.forgetContact(connectionId);
+    }
+  }
+
+  private forgetContact(connectionId: string): void {
+    for (const link of Array.from(this.links.values())) {
+      if (link.connectionId === connectionId) this.teardown(link.sessionId, false);
+    }
+    const roomCode = this.persistentRooms.get(connectionId);
+    if (roomCode) {
+      this.signalingClient?.leaveRoom(roomCode);
+      this.persistentRooms.delete(connectionId);
     }
   }
 
   /**
-   * Triggert Resync für alle Verbindungen
+   * Überträgt die freigegebenen Felder erneut an einen Kontakt.
+   * Wird nach Änderungen an Karte oder Freigabe automatisch erledigt; die
+   * Methode gibt es für eine ausdrückliche Wiederholung.
    */
+  async resyncConnection(connectionId: string): Promise<boolean> {
+    const link = this.findLink(connectionId);
+    if (!link) return false;
+    await link.controller.resync();
+    return true;
+  }
+
   async resyncAll(): Promise<void> {
-    for (const syncController of this.syncControllers.values()) {
-      await syncController.resync();
+    for (const link of this.links.values()) {
+      if (link.controller.isReady()) await link.controller.resync();
     }
   }
 
-  /**
-   * Gibt die lokale Session-ID zurück
-   */
+  // --- Zustand und Ereignisse ---
+
+  onLink(listener: (event: LinkEvent) => void): () => void {
+    this.linkListeners.push(listener);
+    return () => {
+      const index = this.linkListeners.indexOf(listener);
+      if (index !== -1) this.linkListeners.splice(index, 1);
+    };
+  }
+
+  private emit(event: LinkEvent): void {
+    this.linkListeners.slice().forEach((listener) => listener(event));
+  }
+
+  /** Zustand des Vermittlungsdienstes */
+  onServiceStatus(listener: (status: SignalingStatus) => void): () => void {
+    this.statusListeners.push(listener);
+    return () => {
+      const index = this.statusListeners.indexOf(listener);
+      if (index !== -1) this.statusListeners.splice(index, 1);
+    };
+  }
+
+  getServiceStatus(): SignalingStatus {
+    return this.signalingClient?.getStatus() ?? 'connecting';
+  }
+
   getLocalPeerId(): string {
     return this.localSessionId;
   }
 
-  /**
-   * Gibt den lokalen Public Key zurück
-   */
   getLocalPubKey(): string {
     return this.localPubKey;
   }
 
-  /**
-   * Gibt den Fingerprint zurück
-   */
   async getFingerprint(): Promise<string> {
     return createFingerprint(this.localPubKey);
   }
 
   /**
-   * Beendet den P2P-Manager
+   * Beendet den Manager
    */
   destroy(): void {
-    // Alle Verbindungen schließen
-    for (const syncController of this.syncControllers.values()) {
-      syncController.destroy();
+    this.destroyed = true;
+    if (this.unsubscribeStore) {
+      this.unsubscribeStore();
+      this.unsubscribeStore = null;
     }
-    this.syncControllers.clear();
-    this.connectionIdToController.clear();
-
-    for (const peerConnection of this.pendingConnections.values()) {
-      peerConnection.destroy();
+    if (this.syncTimer !== null) {
+      clearTimeout(this.syncTimer);
+      this.syncTimer = null;
     }
-    this.pendingConnections.clear();
+    for (const timer of this.rejoinTimers.values()) clearTimeout(timer);
+    this.rejoinTimers.clear();
 
-    // Signaling-Client trennen
+    for (const sessionId of Array.from(this.links.keys())) {
+      this.teardown(sessionId, false);
+    }
+    this.persistentRooms.clear();
+    this.sessionRooms.clear();
+    this.invite = null;
+
     if (this.signalingClient) {
       this.signalingClient.disconnect();
       this.signalingClient = null;
     }
-
-    // Reset flags
+    this.linkListeners = [];
+    this.statusListeners = [];
     this.isInitialized = false;
-    this.isInitializing = false;
   }
 }
 
@@ -343,17 +501,9 @@ export class P2PManager {
 let globalManager: P2PManager | null = null;
 
 export function initP2PManager(config: P2PManagerConfig): P2PManager {
-  // Wiederverwende existierenden Manager falls möglich
-  if (globalManager && (globalManager as any).isInitialized) {
-    console.log('♻️ Wiederverwende existierenden P2PManager');
-    return globalManager;
-  }
-
-  // Destroy alter Manager falls vorhanden
   if (globalManager) {
     globalManager.destroy();
   }
-
   globalManager = new P2PManager(config);
   return globalManager;
 }

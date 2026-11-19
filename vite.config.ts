@@ -7,8 +7,14 @@ export default defineConfig({
     react(),
     wasm(),
   ],
+  // Relative Pfade, damit die App auch in einem Unterordner läuft
+  base: './',
   server: {
     port: 5173,
+    proxy: {
+      // Vermittlungsdienst im Entwicklungsbetrieb (npm run signal)
+      '/signal': { target: 'ws://localhost:8080', ws: true },
+    },
   },
   build: {
     outDir: 'dist',

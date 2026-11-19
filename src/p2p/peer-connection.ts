@@ -5,6 +5,7 @@
 import SimplePeer from 'simple-peer';
 import type { Instance, SignalData } from 'simple-peer';
 import type { P2PMessage } from '../types';
+import { getIceServers } from '../config';
 
 export type PeerConnectionEventType =
   | 'signal'
@@ -39,12 +40,7 @@ export class PeerConnection {
       initiator: this.initiator,
       trickle: true,
       config: {
-        iceServers: [
-          // Optimale Anzahl STUN-Server (3-4 für beste Performance)
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' },
-          { urls: 'stun:stun.services.mozilla.com' },
-        ],
+        iceServers: getIceServers(),
         iceTransportPolicy: 'all',
         bundlePolicy: 'max-bundle',
         rtcpMuxPolicy: 'require',
@@ -81,7 +77,7 @@ export class PeerConnection {
     });
 
     this.peer.on('error', (error: Error) => {
-      console.error(`WebRTC-Fehler:`, error.message);
+      console.warn('Direkte Verbindung fehlgeschlagen:', error.message);
       this.emit('error', { type: 'error', error });
     });
   }
@@ -90,8 +86,12 @@ export class PeerConnection {
    * Verarbeitet ein eingehendes Signal
    */
   signal(signalData: SignalData): void {
-    if (this.peer) {
-      this.peer.signal(signalData);
+    if (this.peer && !(this.peer as unknown as { destroyed?: boolean }).destroyed) {
+      try {
+        this.peer.signal(signalData);
+      } catch (error) {
+        console.warn('Signal konnte nicht verarbeitet werden', error);
+      }
     }
   }
 
@@ -100,10 +100,11 @@ export class PeerConnection {
    */
   send(message: P2PMessage): void {
     if (this.peer && this.connected) {
-      const data = new TextEncoder().encode(JSON.stringify(message));
-      this.peer.send(data);
-    } else {
-      console.warn(`Peer ${this.peerId} nicht verbunden, kann Nachricht nicht senden`);
+      try {
+        this.peer.send(new TextEncoder().encode(JSON.stringify(message)));
+      } catch (error) {
+        console.warn('Nachricht konnte nicht gesendet werden', error);
+      }
     }
   }
 
@@ -111,6 +112,7 @@ export class PeerConnection {
    * Schließt die Verbindung
    */
   destroy(): void {
+    this.listeners.clear();
     if (this.peer) {
       this.peer.destroy();
       this.peer = null;
@@ -164,5 +166,9 @@ export class PeerConnection {
    */
   getPeerId(): string {
     return this.peerId;
+  }
+
+  isInitiator(): boolean {
+    return this.initiator;
   }
 }

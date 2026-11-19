@@ -1,90 +1,92 @@
 /**
- * Unit-Tests für Policy-Engine
+ * Unit-Tests für die Freigabe-Regeln
  */
 
 import { describe, it, expect } from 'vitest';
-import { projectFields, validatePolicy } from './policy';
-import type { AddressCard } from '../types';
+import { projectFields, validatePolicy, sanitizeRemoteCard, POLICY_PRESETS } from './policy';
+import { createEmptyCard, ADDRESS_CARD_FIELDS, type AddressCard } from '../types';
+import { describeShare, matchPreset, SHARE_PRESETS, CARD_FIELDS } from '../model/fields';
 
-describe('Policy Engine', () => {
-  const testCard: AddressCard = {
-    id: '123',
-    firstName: 'Max',
-    lastName: 'Mustermann',
-    street: 'Musterstraße 1',
-    postalCode: '12345',
-    city: 'Berlin',
-    country: 'Deutschland',
-    email: 'max@example.com',
-    phone: '+49123456789',
-    birthday: '1990-01-01',
-    organization: 'Musterfirma',
-    updatedAt: '2024-01-01T00:00:00Z',
-  };
+const testCard: AddressCard = {
+  ...createEmptyCard('00000000-0000-4000-8000-000000000000'),
+  firstName: 'Max',
+  lastName: 'Mustermann',
+  street: 'Musterstraße',
+  houseNumber: '1',
+  postalCode: '12345',
+  city: 'Berlin',
+  country: 'DE',
+  emailPrivate: 'max@example.com',
+  phoneMobile: '+49123456789',
+  birthday: '1990-01-01',
+  organization: 'Musterfirma',
+};
 
-  describe('projectFields', () => {
-    it('sollte nur erlaubte Felder zurückgeben', () => {
-      const allowedFields = ['firstName', 'lastName', 'email'];
-      const result = projectFields(testCard, allowedFields);
-
-      expect(result).toEqual({
-        firstName: 'Max',
-        lastName: 'Mustermann',
-        email: 'max@example.com',
-      });
-    });
-
-    it('sollte leeres Objekt zurückgeben, wenn keine Felder erlaubt sind', () => {
-      const result = projectFields(testCard, []);
-      expect(result).toEqual({});
-    });
-
-    it('sollte ungültige Felder ignorieren', () => {
-      const allowedFields = ['firstName', 'invalidField', 'email'];
-      const result = projectFields(testCard, allowedFields);
-
-      expect(result).toEqual({
-        firstName: 'Max',
-        email: 'max@example.com',
-      });
-    });
-
-    it('sollte alle Felder zurückgeben, wenn alle erlaubt sind', () => {
-      const allowedFields = [
-        'id',
-        'firstName',
-        'lastName',
-        'street',
-        'postalCode',
-        'city',
-        'country',
-        'email',
-        'phone',
-        'birthday',
-        'organization',
-        'updatedAt',
-      ];
-      const result = projectFields(testCard, allowedFields);
-
-      expect(result).toEqual(testCard);
+describe('projectFields', () => {
+  it('gibt nur freigegebene Felder zurück', () => {
+    expect(projectFields(testCard, ['firstName', 'lastName', 'emailPrivate'])).toEqual({
+      firstName: 'Max',
+      lastName: 'Mustermann',
+      emailPrivate: 'max@example.com',
     });
   });
 
-  describe('validatePolicy', () => {
-    it('sollte gültige Policies akzeptieren', () => {
-      expect(validatePolicy(['firstName', 'lastName', 'email'])).toBe(true);
-      expect(validatePolicy(['street', 'city', 'postalCode'])).toBe(true);
-      expect(validatePolicy([])).toBe(true);
-    });
+  it('gibt ohne Freigabe nichts zurück', () => {
+    expect(projectFields(testCard, [])).toEqual({});
+  });
 
-    it('sollte Custom-Felder akzeptieren', () => {
-      expect(validatePolicy(['firstName', 'custom.twitter'])).toBe(true);
-      expect(validatePolicy(['custom.field1', 'custom.field2'])).toBe(true);
-    });
+  it('überträgt weder leere noch unbekannte Felder noch Interna', () => {
+    const result = projectFields(testCard, ['firstName', 'fax', 'id', 'updatedAt', 'gibtEsNicht']);
+    expect(result).toEqual({ firstName: 'Max' });
+  });
+});
 
-    it('sollte ungültige Felder ablehnen', () => {
-      expect(validatePolicy(['firstName', 'invalidField'])).toBe(false);
-      expect(validatePolicy(['notAField'])).toBe(false);
+describe('validatePolicy', () => {
+  it('akzeptiert bekannte Felder', () => {
+    expect(validatePolicy(['firstName', 'phoneMobile'])).toBe(true);
+    expect(validatePolicy([...ADDRESS_CARD_FIELDS])).toBe(true);
+  });
+
+  it('lehnt unbekannte und alte Feldnamen ab', () => {
+    expect(validatePolicy(['firstName', 'email'])).toBe(false);
+    expect(validatePolicy(['notes'])).toBe(false);
+  });
+});
+
+describe('sanitizeRemoteCard', () => {
+  it('übernimmt nur bekannte Textfelder', () => {
+    const result = sanitizeRemoteCard({
+      firstName: 'Anna',
+      phoneMobile: 123,
+      notes: 'privat',
+      __proto__: { x: 1 },
+      city: '',
     });
+    expect(result).toEqual({ firstName: 'Anna' });
+  });
+
+  it('verkraftet unbrauchbare Eingaben', () => {
+    expect(sanitizeRemoteCard(null)).toEqual({});
+    expect(sanitizeRemoteCard('text')).toEqual({});
+  });
+});
+
+describe('Vorlagen', () => {
+  it('enthalten nur gültige Felder', () => {
+    for (const preset of SHARE_PRESETS) {
+      expect(validatePolicy(preset.fields)).toBe(true);
+    }
+    expect(POLICY_PRESETS.none).toEqual([]);
+  });
+
+  it('werden wiedererkannt und beschrieben', () => {
+    expect(matchPreset(['lastName', 'phoneMobile', 'firstName'])?.id).toBe('namePhone');
+    expect(describeShare([])).toBe('Nichts freigegeben');
+    expect(describeShare(['firstName'])).toBe('1 Angabe');
+    expect(describeShare(CARD_FIELDS.map((f) => f.key))).toBe('Alles');
+  });
+
+  it('jedes Kartenfeld hat eine Beschreibung', () => {
+    expect(CARD_FIELDS.map((f) => f.key).sort()).toEqual([...ADDRESS_CARD_FIELDS].sort());
   });
 });

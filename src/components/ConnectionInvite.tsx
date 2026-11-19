@@ -4,7 +4,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { generateConnectionCode } from '../utils/crypto';
 import { getP2PManager } from '../p2p/p2p-manager';
 import { ADDRESS_CARD_FIELDS } from '../types';
 import { getFieldLabel } from '../utils/policy';
@@ -20,36 +19,29 @@ export const ConnectionInvite: React.FC<ConnectionInviteProps> = ({
   onFieldsChange,
   onClose,
 }) => {
-  const [roomCode] = useState(generateConnectionCode());
-  const [hasJoined, setHasJoined] = useState(false);
+  const [roomCode, setRoomCode] = useState('');
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     // QR-Code generieren
-    if (canvasRef.current) {
+    if (canvasRef.current && roomCode) {
       QRCode.toCanvas(canvasRef.current, roomCode, {
         width: 200,
         margin: 2,
       }).catch(console.error);
     }
 
-    // Raum beitreten
-    if (!hasJoined) {
+    if (!roomCode) {
       const manager = getP2PManager();
-      if (manager) {
-        // Setze Standard-Freigabe für neue Connections
-        manager.setDefaultAllowedFields(fields);
-        manager.joinRoom(roomCode);
-        setHasJoined(true);
-      }
+      if (manager) setRoomCode(manager.startInvite(fields));
     }
-  }, [roomCode, hasJoined, fields]);
+  }, [roomCode, fields]);
 
   // Update defaultAllowedFields wenn Felder geändert werden
   useEffect(() => {
     const manager = getP2PManager();
     if (manager) {
-      manager.setDefaultAllowedFields(fields);
+      manager.setInviteFields(fields);
     }
   }, [fields]);
 

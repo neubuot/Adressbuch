@@ -1,396 +1,267 @@
 /**
- * Sync-Controller für Peer-Synchronisation
- * Implementiert das P2P-Protokoll: HELLO, POLICY, STATE_HASH, PATCH, ACK
+ * Abgleich mit genau einem verbundenen Gerät.
+ *
+ * Ablauf:
+ *   1. HELLO  – beide Seiten nennen Schlüssel, Schemaversion und einen Einmalwert
+ *   2. AUTH   – beide Seiten signieren den Einmalwert der Gegenseite und weisen
+ *               damit nach, dass ihnen der genannte Schlüssel gehört
+ *   3. STATE_HASH – "diesen Stand habe ich von dir"
+ *   4. PATCH  – nur wenn der Stand abweicht: die freigegebenen Felder
+ *   5. ACK    – Bestätigung
+ *
+ * Bei unterschiedlicher Schema-Hauptversion endet der Ablauf nach Schritt 1:
+ * Es werden keine Kartendaten gesendet und keine angenommen.
  */
 
-import { PeerConnection } from './peer-connection';
+import type { PeerConnection } from './peer-connection';
 import { store } from '../store/automerge-store';
 import { projectFields } from '../utils/policy';
 import { stableHash } from '../utils/hash';
-import { createFingerprint } from '../utils/crypto';
-import type {
-  P2PMessage,
-  HelloMessage,
-  PolicyMessage,
-  StateHashMessage,
-  PatchMessage,
-  AckMessage,
-} from '../types';
+import { createFingerprint, createNonce, signText, verifyText } from '../utils/crypto';
+import { APP_VERSION, SCHEMA_VERSION, isSchemaCompatible, type P2PMessage } from '../types';
 
-export type SyncStatus = 'idle' | 'connecting' | 'handshake' | 'syncing' | 'synced' | 'error';
+export type ContactDecision = 'known' | 'new' | 'reject';
+
+export interface SyncHost {
+  localPubKey: string;
+  localPrivateKey: string;
+  /**
+   * Entscheidet, ob das Gerät mit dieser Kennung ein bekannter Kontakt ist,
+   * als neuer Kontakt angelegt wird oder abgewiesen wird.
+   */
+  resolveContact(sessionId: string, connectionId: string, pubKey: string): Promise<ContactDecision>;
+  /** Wird aufgerufen, sobald der Abgleich mit dem Kontakt läuft */
+  onLinked(sessionId: string, connectionId: string, isNew: boolean): void;
+  /** Wird aufgerufen, wenn die Versionen nicht zusammenpassen */
+  onIncompatible(sessionId: string, connectionId: string): void;
+  /** Wird aufgerufen, wenn die Verbindung abgewiesen wurde */
+  onRejected(sessionId: string): void;
+}
+
+const NO_CARD_YET = 'none';
+
+function authText(nonce: string, pubKey: string): string {
+  return `p2p-adressbuch-auth|${nonce}|${pubKey}`;
+}
 
 export class SyncController {
-  private status: SyncStatus = 'idle';
-  private _remotePubKey: string | null = null;
-  private _connectionId: string | null = null; // Fingerprint (persistent)
-  private handshakeCompleted = false;
+  private readonly localNonce = createNonce();
+  private remotePubKey: string | null = null;
+  private remoteNonce: string | null = null;
+  private connectionId: string | null = null;
+  private ready = false;
+  private incompatible = false;
+  private destroyed = false;
+  private lastSentHash: string | null = null;
+  private queue: Promise<void> = Promise.resolve();
 
   constructor(
-    private sessionId: string, // Session-ID (temporär, für WebRTC)
+    private sessionId: string,
     private peerConnection: PeerConnection,
-    private localPubKey: string,
-    private getDefaultFields: () => string[], // Callback für Standard-Freigabe
-    private onConnectionIdKnown: (connectionId: string) => void, // Callback wenn Fingerprint bekannt
-    alreadyConnected = false
+    private host: SyncHost
   ) {
-    this.setupListeners();
-
-    // Falls bereits verbunden, starte Handshake sofort
-    if (alreadyConnected) {
-      this.status = 'handshake';
-      this.startHandshake();
-    }
-  }
-
-  /**
-   * Gibt die Connection-ID (Fingerprint) zurück, oder Session-ID als Fallback
-   */
-  private getConnectionId(): string {
-    return this._connectionId || this.sessionId;
-  }
-
-  /**
-   * Initialisiert Event-Listener
-   */
-  private setupListeners(): void {
-    this.peerConnection.on('connect', () => {
-      this.status = 'handshake';
-      this.startHandshake();
-    });
-
     this.peerConnection.on('data', (event) => {
-      if (event.data) {
-        this.handleMessage(event.data as P2PMessage);
-      }
-    });
-
-    this.peerConnection.on('close', () => {
-      this.status = 'idle';
-      this.updateConnectionStatus('offline');
-    });
-
-    this.peerConnection.on('error', () => {
-      this.status = 'error';
-      this.updateConnectionStatus('offline');
+      const message = event.data as P2PMessage;
+      // Nachrichten streng nacheinander verarbeiten
+      this.queue = this.queue
+        .then(() => this.handleMessage(message))
+        .catch((error) => console.error('Fehler beim Abgleich', error));
     });
   }
 
-  /**
-   * Startet den Handshake-Prozess
-   */
-  private startHandshake(): void {
-    const hello: HelloMessage = {
+  /** Startet den Ablauf, sobald die direkte Verbindung steht */
+  start(): void {
+    this.peerConnection.send({
       type: 'HELLO',
-      peerId: this.sessionId,
-      pubKey: this.localPubKey,
-      appVersion: '0.1.0',
-      schemaVersion: '1.0.0',
-    };
-
-    this.peerConnection.send(hello);
+      pubKey: this.host.localPubKey,
+      appVersion: APP_VERSION,
+      schemaVersion: SCHEMA_VERSION,
+      nonce: this.localNonce,
+    });
   }
 
-  /**
-   * Verarbeitet eingehende Nachrichten
-   */
-  private handleMessage(message: P2PMessage): void {
+  private async handleMessage(message: P2PMessage): Promise<void> {
+    if (this.destroyed || !message || typeof message !== 'object') return;
+
     switch (message.type) {
       case 'HELLO':
-        this.handleHello(message as HelloMessage);
+        await this.handleHello(message.pubKey, message.schemaVersion, message.nonce);
         break;
-      case 'POLICY':
-        this.handlePolicy(message as PolicyMessage);
+      case 'AUTH':
+        await this.handleAuth(message.signature);
         break;
       case 'STATE_HASH':
-        this.handleStateHash(message as StateHashMessage);
+        await this.handleStateHash(message.hash);
         break;
       case 'PATCH':
-        this.handlePatch(message as PatchMessage);
+        await this.handlePatch(message.schemaVersion, message.fields);
         break;
       case 'ACK':
-        this.handleAck(message as AckMessage);
+        await this.handleAck();
         break;
       default:
-        console.warn(`Unbekannter Nachrichtentyp: ${(message as P2PMessage).type}`);
+        // Unbekannte Nachrichten (z. B. von anderen Versionen) werden ignoriert
+        break;
     }
   }
 
-  /**
-   * Verarbeitet HELLO-Nachricht
-   */
-  private async handleHello(message: HelloMessage): Promise<void> {
-    this._remotePubKey = message.pubKey;
+  private async handleHello(pubKey: unknown, schemaVersion: unknown, nonce: unknown): Promise<void> {
+    if (this.remotePubKey) return;
+    if (typeof pubKey !== 'string' || pubKey.length < 16 || pubKey.length > 1000) return;
 
-    // Berechne persistente Connection-ID (Fingerprint) vom Remote Public Key
-    this._connectionId = await createFingerprint(message.pubKey);
+    this.remotePubKey = pubKey;
+    const connectionId = await createFingerprint(pubKey);
 
-    // Benachrichtige P2PManager über die Connection-ID
-    this.onConnectionIdKnown(this._connectionId);
-
-    // Schema-Kompatibilität prüfen
-    if (message.schemaVersion !== '1.0.0') {
-      console.warn(`⚠️ Schema-Version nicht kompatibel: ${message.schemaVersion}`);
-    }
-
-    // Prüfe ob Connection mit diesem Fingerprint bereits existiert
-    const doc = store.getDoc();
-    const existingConnection = doc.connections[this._connectionId];
-
-    if (existingConnection) {
-      console.log(`✅ Peer ${this._connectionId} verbunden (bekannt)`);
-    } else {
-      console.log(`✅ Peer ${this._connectionId} verbunden (neu)`);
-    }
-
-    // Sende eigene HELLO, falls noch nicht geschehen
-    if (!this.handshakeCompleted) {
-      this.startHandshake();
-    }
-
-    // Sende Policy
-    await this.sendPolicy();
-
-    this.updateConnectionStatus('online');
-  }
-
-  /**
-   * Sendet die Policy (erlaubte Felder)
-   */
-  private async sendPolicy(skipStateHash = false): Promise<void> {
-    const doc = store.getDoc();
-    const connectionId = this.getConnectionId();
-    let connection = doc.connections[connectionId];
-
-    // Falls Connection noch nicht existiert (eingehende Verbindung), erstelle eine
-    if (!connection) {
-      const defaultFields = this.getDefaultFields();
-
-      // Erstelle Connection mit Fingerprint als ID
-      await store.addConnection(connectionId, this._remotePubKey || '', defaultFields);
-
-      // Lade neu
-      const updatedDoc = store.getDoc();
-      connection = updatedDoc.connections[connectionId];
-
-      if (!connection) {
-        console.error(`❌ Konnte Connection ${connectionId} nicht erstellen`);
-        return;
+    if (!isSchemaCompatible(typeof schemaVersion === 'string' ? schemaVersion : undefined)) {
+      // Andere Hauptversion: nichts senden, nichts annehmen
+      this.incompatible = true;
+      this.connectionId = connectionId;
+      if (store.getDoc().connections[connectionId]) {
+        await store.updateConnection(connectionId, { incompatible: true, status: 'offline' });
       }
+      this.host.onIncompatible(this.sessionId, connectionId);
+      return;
     }
 
-    const policy: PolicyMessage = {
-      type: 'POLICY',
-      allowedFields: connection.allowedFields,
-    };
-
-    this.peerConnection.send(policy);
-
-    // Nach Policy-Austausch: State-Hash senden (außer wenn skipStateHash = true)
-    if (!skipStateHash) {
-      setTimeout(() => this.sendStateHash(), 100);
+    if (typeof nonce !== 'string' || nonce.length < 8 || nonce.length > 200) {
+      this.host.onRejected(this.sessionId);
+      return;
     }
+    this.remoteNonce = nonce;
+
+    const signature = await signText(
+      this.host.localPrivateKey,
+      authText(nonce, this.host.localPubKey)
+    );
+    this.peerConnection.send({ type: 'AUTH', signature });
   }
 
-  /**
-   * Verarbeitet POLICY-Nachricht
-   */
-  private handlePolicy(_message: PolicyMessage): void {
-    // Nach Policy-Empfang: State-Hash senden
-    if (this.handshakeCompleted) {
-      // Policy hat sich geändert → sende STATE_HASH, um Update zu triggern
-      this.sendStateHash();
-    } else {
-      this.handshakeCompleted = true;
+  private async handleAuth(signature: unknown): Promise<void> {
+    if (this.ready || this.incompatible || !this.remotePubKey || !this.remoteNonce) return;
+    if (typeof signature !== 'string') return;
+
+    const valid = await verifyText(
+      this.remotePubKey,
+      authText(this.localNonce, this.remotePubKey),
+      signature
+    );
+    if (!valid) {
+      console.warn('Identität der Gegenseite konnte nicht bestätigt werden');
+      this.host.onRejected(this.sessionId);
+      return;
     }
+
+    const connectionId = await createFingerprint(this.remotePubKey);
+    const decision = await this.host.resolveContact(this.sessionId, connectionId, this.remotePubKey);
+    if (this.destroyed) return;
+    if (decision === 'reject') {
+      this.host.onRejected(this.sessionId);
+      return;
+    }
+
+    this.connectionId = connectionId;
+    const connection = store.getDoc().connections[connectionId];
+    if (connection?.incompatible) {
+      await store.updateConnection(connectionId, { incompatible: undefined });
+    }
+    await store.setConnectionStatus(connectionId, 'online');
+
+    this.ready = true;
+    this.host.onLinked(this.sessionId, connectionId, decision === 'new');
+    this.sendStateHash();
   }
 
-  /**
-   * Sendet den Hash des aktuellen freigegebenen States
-   * STATE_HASH = "Das ist der Hash von dem, was ich VON DIR habe"
-   */
+  /** Teilt der Gegenseite mit, welchen Stand ihrer Karte ich habe */
   private sendStateHash(): void {
-    const doc = store.getDoc();
-    const connection = doc.connections[this.getConnectionId()];
-
-    if (!connection) {
-      return;
-    }
-
-    // Hash von dem, was ich VON Remote habe (remoteCard)
-    const hash = connection.remoteCard ? stableHash(connection.remoteCard) : stableHash({});
-
-    const stateHash: StateHashMessage = {
-      type: 'STATE_HASH',
-      hash,
-    };
-
-    this.peerConnection.send(stateHash);
+    const connection = this.getConnection();
+    if (!connection) return;
+    const hash = connection.remoteCard ? stableHash(connection.remoteCard) : NO_CARD_YET;
+    this.peerConnection.send({ type: 'STATE_HASH', hash });
   }
 
-  /**
-   * Verarbeitet STATE_HASH-Nachricht
-   * Remote sagt: "Das ist der Hash von dem, was ich VON DIR habe"
-   * Ich vergleiche: "Ist das der gleiche Hash wie das, was ICH sende?"
-   */
-  private handleStateHash(message: StateHashMessage): void {
-    const doc = store.getDoc();
-    const connection = doc.connections[this.getConnectionId()];
+  private async handleStateHash(remoteHash: unknown): Promise<void> {
+    if (!this.ready) return;
+    const connection = this.getConnection();
+    if (!connection) return;
 
-    if (!connection) {
-      return;
-    }
-
-    // Hash von dem, was ICH sende (meine allowedFields)
-    const sharedFields = projectFields(doc.myCard, connection.allowedFields);
-    const localHash = stableHash(sharedFields);
-
-    // Vergleiche Hashes
-    if (localHash !== message.hash) {
-      this.status = 'syncing';
+    const projection = projectFields(store.getDoc().myCard, connection.allowedFields);
+    const localHash = stableHash(projection);
+    if (remoteHash !== localHash) {
       this.sendPatch();
     } else {
-      this.status = 'synced';
-      this.updateConnectionStatus('online');
+      this.lastSentHash = localHash;
+      this.peerConnection.send({ type: 'ACK', hash: localHash });
     }
   }
 
-  /**
-   * Sendet ein PATCH mit den freigegebenen Feldern
-   */
+  /** Sendet die für diesen Kontakt freigegebenen Felder */
   private sendPatch(): void {
-    const doc = store.getDoc();
-    const connection = doc.connections[this.getConnectionId()];
+    const connection = this.getConnection();
+    if (!this.ready || !connection) return;
 
-    if (!connection) {
-      return;
+    const fields = projectFields(store.getDoc().myCard, connection.allowedFields);
+    this.lastSentHash = stableHash(fields);
+    this.peerConnection.send({ type: 'PATCH', schemaVersion: SCHEMA_VERSION, fields });
+  }
+
+  private async handlePatch(schemaVersion: unknown, fields: unknown): Promise<void> {
+    if (!this.ready || !this.connectionId) return;
+    if (!isSchemaCompatible(typeof schemaVersion === 'string' ? schemaVersion : undefined)) return;
+    const connection = this.getConnection();
+    if (!connection) return;
+
+    if (connection.storeRemoteCard) {
+      await store.applyRemoteCard(this.connectionId, fields);
     }
+    this.peerConnection.send({ type: 'ACK' });
+  }
 
-    const sharedFields = projectFields(doc.myCard, connection.allowedFields);
-
-    const patch: PatchMessage = {
-      type: 'PATCH',
-      fields: sharedFields,
-    };
-
-    this.peerConnection.send(patch);
+  private async handleAck(): Promise<void> {
+    if (!this.ready || !this.connectionId) return;
+    await store.updateConnection(this.connectionId, { lastSyncAt: new Date().toISOString() });
   }
 
   /**
-   * Verarbeitet PATCH-Nachricht
+   * Sendet die Karte erneut, wenn sich das, was dieser Kontakt sehen darf,
+   * seit dem letzten Senden geändert hat (Karte oder Freigabe).
    */
-  private async handlePatch(message: PatchMessage): Promise<void> {
-    const doc = store.getDoc();
-    const connection = doc.connections[this.getConnectionId()];
-
-    if (!connection || !connection.storeRemoteCard) {
-      // ACK senden, auch wenn nicht gespeichert
-      const hash = stableHash(message.fields);
-      const ack: AckMessage = {
-        type: 'ACK',
-        hash,
-      };
-      this.peerConnection.send(ack);
-      return;
-    }
-
-    try {
-      // Serialisiere message.fields zu plain object (kein Automerge-Proxy)
-      const remoteCardData = JSON.parse(JSON.stringify(message.fields));
-
-      // Speichere fremde Karte
-      await store.updateConnection(this.getConnectionId(), {
-        remoteCard: remoteCardData,
-        lastSyncAt: new Date().toISOString(),
-      });
-
-      // Berechne neuen Hash und sende ACK
-      const hash = stableHash(message.fields);
-
-      const ack: AckMessage = {
-        type: 'ACK',
-        hash,
-      };
-
-      this.peerConnection.send(ack);
-
-      this.status = 'synced';
-      this.updateConnectionStatus('online');
-    } catch (error) {
-      console.error(`❌ Fehler beim Verarbeiten von PATCH:`, error);
-      // Sende trotzdem ACK, um Endlosschleife zu vermeiden
-      const hash = stableHash(message.fields);
-      const ack: AckMessage = {
-        type: 'ACK',
-        hash,
-      };
-      this.peerConnection.send(ack);
+  syncIfChanged(): void {
+    const connection = this.getConnection();
+    if (!this.ready || !connection) return;
+    const hash = stableHash(projectFields(store.getDoc().myCard, connection.allowedFields));
+    if (hash !== this.lastSentHash) {
+      this.sendPatch();
     }
   }
 
-  /**
-   * Verarbeitet ACK-Nachricht
-   */
-  private handleAck(_message: AckMessage): void {
-    this.status = 'synced';
-
-    store.updateConnection(this.getConnectionId(), {
-      lastSyncAt: new Date().toISOString(),
-    });
-
-    this.updateConnectionStatus('online');
-  }
-
-  /**
-   * Triggert eine erneute Synchronisation
-   * Wird aufgerufen bei MyCard-Updates oder Policy-Updates
-   */
+  /** Sendet die freigegebenen Felder in jedem Fall erneut */
   async resync(): Promise<void> {
-    if (this.peerConnection.isConnected() && this.handshakeCompleted) {
-      this.status = 'syncing';
-      // Sende neue Policy (falls sie sich geändert hat)
-      await this.sendPolicy(true); // skipStateHash = true
-      // Dann sende PATCH mit den aktuellen Daten
-      setTimeout(() => {
-        this.sendPatch();
-      }, 50);
-    }
+    this.sendPatch();
+  }
+
+  private getConnection() {
+    return this.connectionId ? store.getDoc().connections[this.connectionId] : undefined;
+  }
+
+  getConnectionId(): string | null {
+    return this.ready ? this.connectionId : null;
+  }
+
+  isReady(): boolean {
+    return this.ready;
   }
 
   /**
-   * Aktualisiert die Policy und synchronisiert
-   */
-  async updatePolicy(): Promise<void> {
-    if (this.peerConnection.isConnected() && this.handshakeCompleted) {
-      this.status = 'syncing';
-      // Sende neue Policy (skipStateHash = true)
-      await this.sendPolicy(true);
-      // Dann sende PATCH mit den jetzt freigegebenen Daten
-      setTimeout(() => {
-        this.sendPatch();
-      }, 50);
-    }
-  }
-
-  /**
-   * Aktualisiert den Connection-Status im Store
-   */
-  private updateConnectionStatus(status: 'online' | 'offline' | 'syncing'): void {
-    store.updateConnection(this.getConnectionId(), { status });
-  }
-
-  /**
-   * Gibt den aktuellen Sync-Status zurück
-   */
-  getStatus(): SyncStatus {
-    return this.status;
-  }
-
-  /**
-   * Schließt die Verbindung
+   * Beendet den Abgleich und markiert den Kontakt als nicht verbunden
    */
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    const wasReady = this.ready;
+    this.ready = false;
+    if (wasReady && this.connectionId) {
+      void store.setConnectionStatus(this.connectionId, 'offline');
+    }
     this.peerConnection.destroy();
-    this.status = 'idle';
-    this.updateConnectionStatus('offline');
   }
 }

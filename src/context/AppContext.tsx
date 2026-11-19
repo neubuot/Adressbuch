@@ -6,6 +6,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { store } from '../store/automerge-store';
 import { initP2PManager, getP2PManager } from '../p2p/p2p-manager';
 import type { AppState } from '../types';
+import { getSignalingUrl } from '../config';
 
 interface AppContextValue {
   appState: AppState;
@@ -41,8 +42,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setAppState(store.getDoc());
 
       // P2P-Manager initialisieren
-      const signalingUrl = import.meta.env.VITE_SIGNALING_URL || 'ws://localhost:8080';
-      const manager = initP2PManager({ signalingUrl });
+      const manager = initP2PManager({ signalingUrl: getSignalingUrl() });
       await manager.init();
 
       setIsInitialized(true);

@@ -112,21 +112,86 @@ export async function generatePersistentRoomCode(
   return hashHex.substring(0, 8).toUpperCase();
 }
 
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
 /**
- * Generiert einen 8-stelligen Verbindungscode
+ * Erzeugt einen 8-stelligen Einladungscode ohne verwechselbare Zeichen
+ * (kein 0/O, kein 1/I).
  */
 export function generateConnectionCode(): string {
-  const array = new Uint8Array(4);
-  crypto.getRandomValues(array);
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
   let code = '';
-  for (let i = 0; i < array.length; i++) {
-    code += array[i].toString(36).toUpperCase().padStart(2, '0');
+  for (const byte of bytes) {
+    code += CODE_ALPHABET[byte % CODE_ALPHABET.length];
   }
-  return code.substring(0, 8);
+  return code;
+}
+
+/** Bringt einen eingetippten oder eingescannten Code in die einheitliche Form */
+export function normalizeConnectionCode(input: string): string {
+  return input.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+}
+
+/** Anzeigeform eines Codes: ABCD-EFGH */
+export function formatConnectionCode(code: string): string {
+  return code.length > 4 ? `${code.slice(0, 4)}-${code.slice(4)}` : code;
+}
+
+/** Zufälliger Einmalwert für die Identitätsprüfung */
+export function createNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return arrayBufferToBase64(bytes.buffer);
+}
+
+const SIGN_ALGORITHM = { name: 'ECDSA', hash: 'SHA-256' } as const;
+const KEY_ALGORITHM = { name: 'ECDSA', namedCurve: 'P-256' } as const;
+
+/**
+ * Signiert einen Text mit dem eigenen privaten Schlüssel
+ */
+export async function signText(privateKeyBase64: string, text: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    base64ToArrayBuffer(privateKeyBase64),
+    KEY_ALGORITHM,
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign(SIGN_ALGORITHM, key, new TextEncoder().encode(text));
+  return arrayBufferToBase64(signature);
+}
+
+/**
+ * Prüft, ob eine Signatur zum angegebenen öffentlichen Schlüssel passt
+ */
+export async function verifyText(
+  publicKeyBase64: string,
+  text: string,
+  signatureBase64: string
+): Promise<boolean> {
+  try {
+    const key = await crypto.subtle.importKey(
+      'spki',
+      base64ToArrayBuffer(publicKeyBase64),
+      KEY_ALGORITHM,
+      false,
+      ['verify']
+    );
+    return await crypto.subtle.verify(
+      SIGN_ALGORITHM,
+      key,
+      base64ToArrayBuffer(signatureBase64),
+      new TextEncoder().encode(text)
+    );
+  } catch {
+    return false;
+  }
 }
 
 // Hilfsfunktionen
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';
   for (let i = 0; i < bytes.byteLength; i++) {
@@ -135,7 +200,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-function base64ToArrayBuffer(base64: string): ArrayBuffer {
+export function base64ToArrayBuffer(base64: string): ArrayBuffer {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {

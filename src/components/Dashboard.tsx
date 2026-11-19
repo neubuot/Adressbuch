@@ -27,7 +27,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   const { myCard } = appState;
   const isProfileComplete =
-    myCard.firstName && myCard.lastName && myCard.email;
+    myCard.firstName && myCard.lastName && myCard.emailPrivate;
 
   return (
     <div>
@@ -41,7 +41,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
               <p style={{ marginBottom: '1rem', color: 'var(--text-secondary)' }}>
                 {myCard.firstName} {myCard.lastName}
                 <br />
-                {myCard.email}
+                {myCard.emailPrivate}
               </p>
               <button className="btn btn-secondary btn-small" onClick={() => onNavigate('mycard')}>
                 Bearbeiten

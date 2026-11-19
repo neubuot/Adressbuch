@@ -53,7 +53,7 @@ export const PolicyEditor: React.FC<PolicyEditorProps> = ({ connectionId, onBack
   };
 
   const handlePresetSelect = (preset: keyof typeof POLICY_PRESETS) => {
-    setAllowedFields([...POLICY_PRESETS[preset]]);
+    setAllowedFields([...(POLICY_PRESETS[preset] ?? [])]);
   };
 
   const handleSave = async () => {
