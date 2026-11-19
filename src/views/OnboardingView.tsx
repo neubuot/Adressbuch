@@ -23,7 +23,7 @@ export const OnboardingView: React.FC<{ invited: boolean; onDone: () => void }> 
 
   return (
     <main className="welcome">
-      <svg className="welcome-mark" viewBox="0 0 512 512" aria-hidden="true">
+      <svg className="welcome-mark" viewBox="92 142 316 228" aria-hidden="true">
         <circle cx="206" cy="256" r="92" fill="none" stroke="currentColor" strokeWidth="22" />
         <circle cx="340" cy="256" r="46" fill="var(--c-accent)" />
       </svg>

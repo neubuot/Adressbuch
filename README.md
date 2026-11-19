@@ -1,360 +1,308 @@
-# P2P Adressbuch - Dezentrale Kontaktverwaltung
-
-Eine **lokal-first**, **peer-to-peer fähige** Adressbuch-Web-App, mit der zwei oder mehr Nutzer ihre eigenen Adresskarten gezielt miteinander teilen können. Die App verwendet WebRTC für direkte Peer-to-Peer-Verbindungen, Automerge für konfliktfreie Datensynchronisation und speichert alle Daten lokal im Browser (IndexedDB).
-
-## Features (Phase 1)
-
-✅ **Privacy by Default**: Keine Felder werden standardmäßig geteilt
-✅ **Feldgenaue Freigabe**: Wähle pro Verbindung aus, welche Felder sichtbar sind
-✅ **Offline-fähig**: Lokale Speicherung mit IndexedDB
-✅ **Konfliktfreie Synchronisation**: Automerge CRDT für robuste Datensynchronisation
-✅ **Peer-to-Peer**: Direkte Verbindung über WebRTC, keine Cloud-Datenhaltung
-✅ **QR-Code-Verbindung**: Einfache Verbindung über QR-Code oder 8-stelligen Code
-
-## Architektur
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        Browser A                             │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
-│  │   React UI   │───▶│  Automerge   │───▶│   IndexedDB  │  │
-│  └──────────────┘    │    Store     │    │   (Dexie)    │  │
-│         │             └──────────────┘    └──────────────┘  │
-│         │                     │                              │
-│         │             ┌───────▼──────┐                       │
-│         └────────────▶│  P2P Manager │                       │
-│                       └───────┬──────┘                       │
-│                               │                              │
-│                       ┌───────▼──────────┐                   │
-│                       │  WebRTC (DTLS)   │                   │
-│                       └───────┬──────────┘                   │
-└───────────────────────────────┼───────────────────────────────┘
-                                │
-                   ┌────────────▼────────────┐
-                   │  Signaling-Server (WS)  │
-                   │   (keine Persistenz)    │
-                   └────────────┬────────────┘
-                                │
-┌───────────────────────────────┼───────────────────────────────┐
-│                       ┌───────▼──────────┐                    │
-│                       │  WebRTC (DTLS)   │                    │
-│                       └───────┬──────────┘                    │
-│                               │                               │
-│                       ┌───────▼──────┐                        │
-│         ┌────────────▶│  P2P Manager │                        │
-│         │             └──────────────┘                        │
-│         │                     │                               │
-│  ┌──────┴───────┐    ┌───────▼──────┐    ┌──────────────┐   │
-│  │   React UI   │───▶│  Automerge   │───▶│   IndexedDB  │   │
-│  └──────────────┘    │    Store     │    │   (Dexie)    │   │
-│                      └──────────────┘    └──────────────┘   │
-│                        Browser B                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Tech-Stack
-
-- **Frontend**: TypeScript, React, Vite
-- **State & Replikation**: Automerge (CRDT)
-- **Lokale Persistenz**: IndexedDB via Dexie
-- **P2P-Transport**: WebRTC mit simple-peer
-- **Signalisierung**: WebSocket-Server (Node.js, ws)
-- **Kryptografie**: Web Crypto API (ECDSA P-256)
-
-## Installation & Setup
-
-### Voraussetzungen
-
-- Node.js >= 18
-- npm >= 9
-
-### 1. Repository klonen
-
-```bash
-git clone https://github.com/yourusername/p2p-addressbook.git
-cd p2p-addressbook
-```
-
-### 2. Dependencies installieren
-
-```bash
-# Haupt-Projekt
-npm install
-
-# Signaling-Server
-cd signaling-server
-npm install
-cd ..
-```
-
-### 3. Signaling-Server starten
-
-In einem separaten Terminal:
-
-```bash
-cd signaling-server
-npm start
-```
-
-Der Server läuft auf `ws://localhost:8080`.
-
-### 4. Frontend-Dev-Server starten
-
-```bash
-npm run dev
-```
-
-Die App ist jetzt verfügbar unter `http://localhost:5173`.
-
-## Lokale Tests mit zwei Browsern
-
-### Variante 1: Zwei Browser-Fenster auf einem Gerät
-
-1. Öffne zwei Browser-Fenster/Tabs: `http://localhost:5173`
-2. In Fenster A:
-   - Gehe zu "Meine Adresse" und fülle dein Profil aus
-   - Gehe zu "Verbindungen" → "Einladung erstellen"
-   - Wähle die Felder aus, die du teilen möchtest
-   - Kopiere den Verbindungscode (z.B. `ABC123XY`)
-3. In Fenster B:
-   - Fülle ebenfalls dein Profil aus
-   - Gehe zu "Verbindungen" → "Mit Code verbinden"
-   - Gib den Code aus Fenster A ein
-4. Nach wenigen Sekunden sollten beide Peers verbunden sein
-5. Ändere ein Feld in Fenster A → Fenster B sieht das Update (falls Feld freigegeben)
-
-### Variante 2: Zwei Geräte im gleichen Netzwerk
-
-1. Finde die IP-Adresse deines Entwicklungsrechners:
-   ```bash
-   # Windows
-   ipconfig
-
-   # macOS/Linux
-   ifconfig
-   ```
-
-2. Signaling-Server-URL anpassen (falls nötig):
-   - Erstelle `.env`-Datei im Hauptverzeichnis:
-   ```
-   VITE_SIGNALING_URL=ws://<DEINE-IP>:8080
-   ```
-
-3. Auf Gerät 1: `http://<DEINE-IP>:5173`
-4. Auf Gerät 2: `http://<DEINE-IP>:5173`
-5. Verbinde wie in Variante 1 beschrieben
-
-## Datenmodell
-
-### AddressCard
-
-```typescript
-interface AddressCard {
-  id: string;
-  firstName: string;
-  lastName: string;
-  street: string;
-  postalCode: string;
-  city: string;
-  country: string;
-  email: string;
-  phone: string;
-  birthday: string; // ISO date
-  organization: string;
-  custom?: Record<string, string>;
-  updatedAt: string; // ISO timestamp
-}
-```
-
-### Connection (Peer-Verbindung)
-
-```typescript
-interface Connection {
-  id: string; // peerId
-  label?: string;
-  peerPubKey: string;
-  allowedFields: string[]; // Whitelist
-  storeRemoteCard: boolean;
-  lastSyncAt?: string;
-  status: 'online' | 'offline' | 'syncing';
-  remoteCard?: Partial<AddressCard>;
-}
-```
-
-## P2P-Protokoll
-
-Die App verwendet folgendes Nachrichtenprotokoll für die Peer-Synchronisation:
-
-1. **HELLO**: Peer-Identifikation und App-Version
-2. **POLICY**: Übermittlung der erlaubten Felder
-3. **STATE_HASH**: Hash des aktuellen freigegebenen States
-4. **PATCH**: Differenzielle Aktualisierung bei Abweichung
-5. **ACK**: Bestätigung mit neuem Hash
-
-### Ablauf bei Verbindungsaufbau
-
-```
-Peer A                              Peer B
-  │                                    │
-  ├─────── HELLO ─────────────────────▶│
-  │◀────── HELLO ───────────────────────┤
-  │                                    │
-  ├─────── POLICY ────────────────────▶│
-  │◀────── POLICY ──────────────────────┤
-  │                                    │
-  ├─────── STATE_HASH ────────────────▶│
-  │◀────── STATE_HASH ──────────────────┤
-  │                                    │
-  │ (Hash-Vergleich)                    │ (Hash-Vergleich)
-  │                                    │
-  ├─────── PATCH ─────────────────────▶│ (bei Abweichung)
-  │◀────── ACK ──────────────────────────┤
-  │                                    │
-  │ ✅ Synchron                         │ ✅ Synchron
-```
-
-## Scripts
-
-```bash
-# Frontend-Entwicklung
-npm run dev           # Vite Dev-Server
-npm run build         # Production-Build
-npm run preview       # Preview des Builds
-
-# Tests
-npm test              # Unit-Tests (Vitest)
-npm run test:e2e      # E2E-Tests (Playwright)
-
-# Signaling-Server
-cd signaling-server
-npm start             # Server starten
-npm run dev           # Server mit Auto-Reload
-```
-
-## Projektstruktur
-
-```
-.
-├── src/
-│   ├── components/          # React-Komponenten
-│   │   ├── Dashboard.tsx
-│   │   ├── MyCard.tsx
-│   │   ├── Connections.tsx
-│   │   ├── ConnectionInvite.tsx
-│   │   └── PolicyEditor.tsx
-│   ├── context/             # React Context
-│   │   └── AppContext.tsx
-│   ├── p2p/                 # P2P-Logik
-│   │   ├── p2p-manager.ts
-│   │   ├── signaling.ts
-│   │   ├── peer-connection.ts
-│   │   └── sync-controller.ts
-│   ├── store/               # Automerge + Dexie
-│   │   ├── automerge-store.ts
-│   │   └── db.ts
-│   ├── types/               # TypeScript-Typen
-│   │   └── index.ts
-│   ├── utils/               # Hilfsfunktionen
-│   │   ├── crypto.ts
-│   │   ├── hash.ts
-│   │   └── policy.ts
-│   ├── App.tsx
-│   ├── App.css
-│   └── main.tsx
-├── signaling-server/        # WebSocket-Signaling-Server
-│   ├── index.js
-│   └── package.json
-├── tests/
-│   └── e2e/                 # Playwright E2E-Tests
-│       └── basic.spec.ts
-├── package.json
-├── vite.config.ts
-├── tsconfig.json
-└── README.md
-```
-
-## Sicherheit & Privatsphäre
-
-- **Privacy by Default**: Standardmäßig werden keine Felder geteilt
-- **Feldgenaue Kontrolle**: Nutzer wählt pro Verbindung aus, welche Felder sichtbar sind
-- **Peer-Authentizität**: Fingerprint (Hash des Public Keys) wird angezeigt
-- **Transport-Verschlüsselung**: WebRTC nutzt DTLS (Datagram Transport Layer Security)
-- **Keine Server-seitige Datenhaltung**: Signaling-Server kennt nur Session-Metadaten
-- **Lokale Speicherung**: Alle Daten bleiben im Browser (IndexedDB)
-
-### Was der Signaling-Server sieht
-
-Der Signaling-Server sieht nur:
-- Peer-IDs (zufällige UUIDs)
-- Raum-Codes (temporär)
-- WebRTC-Signaling-Daten (ICE-Kandidaten, SDP-Offers)
-
-Er sieht **nicht**:
-- Adressdaten
-- Welche Felder geteilt werden
-- Den Inhalt der P2P-Nachrichten (diese laufen über den verschlüsselten WebRTC-Kanal)
-
-## Tests
-
-### Unit-Tests ausführen
-
-```bash
-npm test
-```
-
-Tests für:
-- Policy-Engine (Feld-Projektion, Validierung)
-- Hash-Utilities (Deterministische Serialisierung)
-
-### E2E-Tests ausführen
-
-```bash
-# Installation (einmalig)
-npx playwright install
-
-# Tests ausführen
-npm run test:e2e
-```
-
-## Roadmap (Zukünftige Phasen)
-
-Phase 1 (aktuell):
-- ✅ Lokale Speicherung
-- ✅ WebRTC P2P-Verbindungen
-- ✅ Feldgenaue Freigabe
-- ✅ Automerge CRDT
-
-Phase 2 (geplant):
-- [ ] PWA (Progressive Web App)
-- [ ] Service Worker für Offline-Nutzung
-- [ ] Custom-Felder-UI
-- [ ] Multi-Peer-Gruppen
-
-Phase 3 (geplant):
-- [ ] Ende-zu-Ende-Verschlüsselung der Felder
-- [ ] IPFS-Integration für verschlüsselte Backups
-- [ ] Doichain-Integration für Identitäts-/Policy-Management
-- [ ] Mobile Apps (React Native)
-
-## Bekannte Einschränkungen
-
-- **NAT-Traversal**: WebRTC funktioniert nicht immer hinter strengen Firewalls/NATs. In solchen Fällen wäre ein TURN-Server nötig (nicht in Phase 1).
-- **Peer-Discovery**: Aktuell erfolgt Verbindung nur via manuellem Code-Austausch. Automatisches Discovery ist nicht implementiert.
-- **Skalierung**: Optimiert für 1:1 oder kleine Gruppen (< 10 Peers). Viele gleichzeitige Verbindungen können Performance beeinträchtigen.
-- **Browser-Kompatibilität**: Benötigt modernen Browser mit WebRTC- und IndexedDB-Support.
-
-## Lizenz
-
-MIT License - siehe [LICENSE](LICENSE)
-
-## Mitwirken
-
-Contributions sind willkommen! Bitte erstelle ein Issue oder Pull Request.
-
-## Support
-
-Bei Problemen bitte ein Issue auf GitHub erstellen.
+# P2P Adressbuch
+
+Ein Adressbuch, das sich selbst aktuell hält – ohne Konto und ohne zentralen Speicher.
+
+Jeder pflegt nur seine **eigene Karte** und legt für jeden Kontakt einzeln fest, was dieser
+davon sehen darf. Ändert jemand seine Nummer oder Adresse, steht sie bei allen verbundenen
+Kontakten automatisch richtig. Die Daten gehen direkt von Gerät zu Gerät.
+
+- [Anleitung für Nutzer](#anleitung-für-nutzer)
+- [Was die App kann](#was-die-app-kann)
+- [Betrieb: was man braucht, um die App bereitzustellen](#betrieb)
+- [Entwicklung](#entwicklung)
+- [Datenmodell](#datenmodell)
+- [Sicherheit und Grenzen](#sicherheit-und-grenzen)
 
 ---
 
-**Hinweis**: Dies ist eine Entwicklungsversion (Phase 1). Für Produktivnutzung werden weitere Sicherheits-Features (E2E-Verschlüsselung, TURN-Server) empfohlen
+## Anleitung für Nutzer
+
+Diese Anleitung setzt voraus, dass jemand die App für dich bereitgestellt hat und du die
+Adresse kennst (z. B. `https://adressbuch.example.org`). Du brauchst nur einen aktuellen
+Browser auf Handy, Tablet oder Computer.
+
+### 1. Öffnen
+
+1. Öffne die Adresse im Browser.
+2. Trag deinen Vor- und Nachnamen ein und tippe auf **Fertig**.
+
+Mehr ist nicht nötig. Es gibt kein Konto und kein Passwort. Alles Weitere (Telefon, Adresse,
+Geburtstag …) kannst du später unter **Meine Karte** ergänzen.
+
+### 2. Als App installieren (empfohlen)
+
+Installiert liegt das Adressbuch wie jede andere App auf dem Startbildschirm und funktioniert
+auch ohne Internet.
+
+- **Android (Chrome):** Unter **Mehr** auf **Installieren** tippen. Alternativ im Browsermenü
+  (⋮) „App installieren" wählen.
+- **iPhone / iPad (Safari):** Unten auf **Teilen** tippen (Quadrat mit Pfeil nach oben), dann
+  **Zum Home-Bildschirm** und **Hinzufügen**.
+- **Computer (Chrome, Edge):** Unter **Mehr** auf **Installieren** klicken oder das
+  Installations-Symbol rechts in der Adresszeile verwenden.
+
+### 3. Den ersten Kontakt verbinden
+
+Ihr braucht beide die App und Internet. Am einfachsten sitzt ihr nebeneinander.
+
+**Du lädst ein:**
+
+1. **Kontakte → Kontakt verbinden.**
+2. Wähle, was die andere Person von dir sehen darf – z. B. **Nur Name und Telefon**,
+   **Privat** oder **Beruflich** – und tippe auf **Weiter: Code zeigen**.
+3. Die andere Person scannt den angezeigten Code mit ihrer Handykamera. Ist sie nicht in
+   der Nähe, tippe auf **Link teilen** und schick ihr den Link.
+
+**Du wurdest eingeladen:** Scanne den Code mit der Handykamera oder öffne den Link. Wähle,
+was die andere Person von dir sehen darf, und tippe auf **Verbinden**. (Wer keinen Link hat:
+**Kontakt verbinden → Ich habe einen Code** und den achtstelligen Code eintippen.)
+
+Lasst beide die Seite geöffnet, bis **Verbunden** erscheint. Das dauert meist nur einen
+Augenblick.
+
+> **Gut zu wissen:** Änderungen kommen an, wenn ihr beide die App gleichzeitig geöffnet habt.
+> Ist die andere Person gerade nicht da, steht beim Kontakt „Wartet auf Verbindung" – die
+> Änderung wird beim nächsten Mal von selbst nachgeholt.
+
+### 4. Freigabe ändern oder widerrufen
+
+Öffne den Kontakt. Unter **Was … von mir sieht** steht genau, was diese Person von dir sieht.
+Mit **Freigabe ändern** passt du das an, mit **Freigabe widerrufen** nimmst du alles zurück.
+
+Ehrlich gesagt: Was jemand bereits gesehen, abgeschrieben oder ins eigene Telefonbuch
+übernommen hat, lässt sich nicht zurückholen. Ein Widerruf wirkt für die Zukunft.
+
+### 5. Daten sichern
+
+**Dein Adressbuch liegt nur auf deinem Gerät.** Geht das Gerät verloren oder löschst du die
+Browserdaten, ist es weg. Deshalb:
+
+1. **Mehr → Daten sichern und wiederherstellen.**
+2. Ein Passwort wählen (mindestens 8 Zeichen), wiederholen, **Sicherung speichern**.
+3. Die Datei an einem sicheren Ort aufbewahren (z. B. USB-Stick oder eigener Cloud-Speicher).
+
+Die Datei ist mit deinem Passwort verschlüsselt. **Ohne das Passwort lässt sie sich nicht
+öffnen, und niemand kann es zurücksetzen.**
+
+**Wiederherstellen** (z. B. auf einem neuen Gerät): App öffnen, beim Einstieg auf „Ich habe
+schon ein Adressbuch …" tippen, Datei auswählen, Passwort eingeben. Deine Kontakte verbinden
+sich danach von selbst wieder. Nutze eine Sicherung immer nur auf einem Gerät zur selben Zeit.
+
+### Vorhandene Kontakte übernehmen
+
+Unter **Mehr → Vorhandene Kontakte übernehmen** kannst du Kontakte aus dem Telefonbuch
+(vCard-Datei, `.vcf`) oder einer Tabelle (`.csv`) einlesen. Sie erscheinen als „Nicht
+verbunden". Wenn du jemanden davon später einlädst, wird aus dem Eintrag eine echte
+Verbindung; deine Notizen und Tags bleiben erhalten.
+
+---
+
+## Was die App kann
+
+| Funktion | Beschreibung |
+| --- | --- |
+| **Was sieht dieser Kontakt von mir?** | Bei jedem Kontakt eine Vorschau der eigenen Karte aus dessen Sicht |
+| **Änderungsübersicht** | „Anna hat die Mobilnummer geändert" – mit altem und neuem Wert, unter **Aktuelles** |
+| **Suche** | Über alle Kontakte und alle Felder (auch Notizen und Telefonnummern in jeder Schreibweise), mit Filter nach Tags |
+| **Direkte Aktionen** | Anrufen, mailen, Adresse in der Karten-App öffnen, ins Telefonbuch übernehmen (vCard) |
+| **Import** | vCard und CSV als nicht verbundene Einträge, später per Einladung umwandelbar |
+| **Geburtstage, lange nicht gesprochen** | Dezente Übersicht unter **Aktuelles** |
+| **Widerruf** | Freigabe jederzeit zurücknehmen, mit klarer Aussage, was das bewirkt |
+| **Vorlagen für die Freigabe** | „Nur Name und Telefon", „Privat", „Beruflich", „Alles" oder eigene Auswahl |
+| **Private Notizen** | Notizen, „zuletzt gesprochen", Herkunft der Daten, Einwilligung – bleiben auf dem Gerät |
+| **Tags** | Kontakte ordnen und filtern |
+| **Export** | CSV, vCard oder JSON; Reihenfolge wählbar, Auswahl nach Tags |
+| **Sicherung** | Verschlüsselt, mit Wiederherstellung auf einem anderen Gerät |
+| **App** | Installierbar, offline nutzbar, helles und dunkles Farbschema |
+
+---
+
+## Betrieb
+
+Nutzer müssen nichts einrichten. Wer die App **bereitstellt**, braucht Folgendes.
+
+### Was nötig ist
+
+1. **Eine Adresse mit HTTPS.** Ohne HTTPS funktionieren Installation, Kamera und
+   Verschlüsselung im Browser nicht (Ausnahme: `localhost` zum Ausprobieren).
+2. **Der Vermittlungsdienst** aus dem Ordner `signaling-server` (Node.js ≥ 18). Er bringt
+   zwei Geräte zusammen, damit sie eine direkte Verbindung aufbauen können. Derselbe Dienst
+   liefert auch die fertige App aus – **ein einziger Dienst genügt.**
+3. **Empfohlen: ein TURN-Server** (z. B. [coturn](https://github.com/coturn/coturn)). Aus
+   manchen Netzen (Mobilfunk, Firmen- und Gäste-WLAN) kommt ohne ihn keine direkte Verbindung
+   zustande. Ohne eigene Angabe werden nur öffentliche STUN-Server verwendet.
+
+### Bereitstellen
+
+```bash
+npm install
+(cd signaling-server && npm install)
+
+npm run build          # baut die App nach dist/
+PORT=8080 npm start    # liefert dist/ aus und vermittelt unter /signal
+```
+
+Davor gehört ein Reverse-Proxy mit HTTPS (Caddy, nginx, Traefik …), der alle Anfragen
+einschließlich WebSocket an diesen Port weiterleitet. Beispiel für Caddy:
+
+```
+adressbuch.example.org {
+    reverse_proxy localhost:8080
+}
+```
+
+Die App erwartet den Vermittlungsdienst unter derselben Adresse wie sich selbst (Pfad
+`/signal`). Es ist also nichts weiter einzustellen.
+
+### Einstellungen (alle freiwillig)
+
+Werden beim Bauen fest in die App übernommen. Vorlage: [.env.example](.env.example).
+
+| Variable | Bedeutung |
+| --- | --- |
+| `VITE_SIGNALING_URL` | Adresse des Vermittlungsdienstes, falls er getrennt von der App läuft, z. B. `wss://signal.example.org/signal` |
+| `VITE_ICE_SERVERS` | STUN/TURN-Server als JSON-Liste, z. B. mit eigenem TURN-Server |
+| `PORT` (Dienst) | Port des Vermittlungsdienstes, Standard `8080` |
+| `STATIC_DIR` (Dienst) | Ordner der gebauten App, Standard `../dist`; `off` schaltet die Auslieferung ab |
+
+`GET /healthz` antwortet mit `ok` und eignet sich für die Überwachung.
+
+### Was der Vermittlungsdienst sieht – und was nicht
+
+- **Sieht:** zufällige Sitzungskennungen, Raumcodes, technische Verbindungsdaten (darunter
+  IP-Adressen) für den Aufbau der direkten Verbindung.
+- **Sieht nicht:** Namen, Karten, Freigaben, Notizen. Kontaktdaten laufen ausschließlich über
+  die direkte, verschlüsselte Verbindung zwischen den Geräten.
+- **Speichert:** nichts.
+
+Hinweis: Mit den voreingestellten öffentlichen STUN-Servern (Google, Mozilla) erfahren deren
+Betreiber die IP-Adresse der Geräte. Wer das vermeiden will, trägt eigene Server ein.
+
+---
+
+## Entwicklung
+
+```bash
+npm install
+(cd signaling-server && npm install)
+
+npm run signal   # Vermittlungsdienst auf Port 8080 (ohne Auslieferung der App)
+npm run dev      # App auf http://localhost:5173 (leitet /signal an Port 8080 weiter)
+```
+
+Zum Ausprobieren mit zwei „Personen" zwei verschiedene Browserprofile oder ein normales und
+ein privates Fenster verwenden; jedes hat sein eigenes Adressbuch.
+
+### Prüfen
+
+```bash
+npx tsc --noEmit     # Typprüfung
+npm test             # Unit-Tests (Vitest)
+npm run build        # Produktions-Build
+npm run test:e2e     # End-to-End-Tests mit zwei Browser-Instanzen (Playwright)
+```
+
+Die End-to-End-Tests bauen die App und starten den Vermittlungsdienst selbst. Einmalig ist
+`npx playwright install chromium` nötig.
+
+### Aufbau
+
+```
+src/
+  styles/tokens.css     Design-Tokens: Farben, Schrift, Abstände (einzige Quelle)
+  styles/app.css        Gestaltung aller Ansichten
+  views/                Ansichten (Kontakte, Kontakt, Freigabe, Verbinden, …)
+  ui/                   Wiederverwendbare Bausteine (Formular, Freigabe-Auswahl, Dialog …)
+  model/                Felder, Kontakt-Logik, Suche, Änderungstexte, Aktionen
+  io/                   vCard, CSV, Export, verschlüsselte Sicherung
+  store/                Automerge-Speicher, Migration, IndexedDB
+  p2p/                  Vermittlung, direkte Verbindung, Abgleich
+  router.ts             Navigation über die Adresse (#/…)
+  pwa.ts                Installation und Offline-Betrieb
+public/                 Manifest, Icons, Service Worker
+signaling-server/       Vermittlungsdienst (liefert auch die App aus)
+tests/e2e/              End-to-End-Tests
+```
+
+### Gestaltung
+
+Leitlinie: so wenig Gestaltung wie möglich. Ruhige helle Flächen, schwarzer Text, genau eine
+Akzentfarbe (Orange) für die wichtigste Aktion einer Ansicht; keine Verläufe, Schatten oder
+Dekoration. Alle Werte stehen in `src/styles/tokens.css`. Komponenten verwenden Klassen aus
+`app.css` statt eigener Stilangaben.
+
+In der Oberfläche kommen keine Fachbegriffe vor (kein „Peer", „Sync", „Policy" …). Ein Test
+prüft das.
+
+---
+
+## Datenmodell
+
+Schemaversion **2.0.0** (`src/types/index.ts`). Felder und ihre Beschriftungen stehen in
+`src/model/fields.ts`; die Spalte „Export" ist der Name in CSV- und JSON-Exporten.
+
+### Eigene Karte (pro Kontakt freigebbar)
+
+| Gruppe | Feld (intern) | Export |
+| --- | --- | --- |
+| Identifikation | `id` (UUID) | `person_id` (wird nicht übertragen) |
+| | `salutation`, `titlePrefix`, `titleSuffix` | `anrede`, `titel_vorne`, `titel_hinten` |
+| | `firstName`, `lastName` (immer getrennt) | `vorname`, `nachname` |
+| | `nickname` | `spitzname` |
+| Organisation | `organization`, `position`, `department`, `organizationId` | `organisation`, `position`, `abteilung`, `organisation_id` |
+| Kommunikation | `emailWork`, `emailPrivate` | `email_geschäftlich`, `email_priv` |
+| | `phoneWork`, `phoneMobile`, `fax` | `telefon_geschäftlich`, `telefon_mobil`, `fax` |
+| | `website`, `linkedin`, `xing`, `github` | `webseite`, `linkedin`, `xing`, `github` |
+| Adresse | `street`, `houseNumber`, `postalCode`, `city`, `state`, `country` (ISO 3166, z. B. `DE`) | `strasse`, `hausnummer`, `plz`, `ort`, `bundesland`, `land` |
+| Sonstiges | `birthday`, `birthplace`, `language`, `timezone` | `geburtsdatum`, `geburtsort`, `sprache`, `zeitzone` |
+
+### Private Angaben zu einem Kontakt (werden nie übertragen)
+
+| Feld (intern) | Export |
+| --- | --- |
+| `notes` | `notizen` |
+| `firstContactAt`, `lastContactAt` | `erstkontakt_am`, `letzter_kontakt_am` |
+| `source`, `dataOrigin` | `quelle`, `datenherkunft` |
+| `gdprConsentAt` | `einwilligung_dsgvo_am` |
+
+### Migration und unterschiedliche Versionen
+
+- Beim Start wird ein älterer Stand automatisch umgestellt (`src/store/migrate.ts`):
+  `email` → `emailPrivate`, `phone` → `phoneMobile`, die Hausnummer wird von der Straße
+  getrennt, Freigaben und empfangene Karten werden entsprechend umbenannt. Nichts wird gelöscht.
+- Stammt der gespeicherte Stand von einer **neueren** App-Version oder ist er nicht lesbar,
+  verändert die App nichts und zeigt einen Hinweis.
+- Zwei Geräte mit unterschiedlicher Schema-Hauptversion tauschen **keine Kartendaten** aus.
+  Der Kontakt zeigt „App-Version passt nicht", bis beide aktualisiert sind.
+
+### Abgleich zwischen zwei Geräten
+
+1. `HELLO` – Schlüssel, Schemaversion, Einmalwert
+2. `AUTH` – Signatur über den Einmalwert der Gegenseite (Identitätsnachweis)
+3. `STATE_HASH` – „diesen Stand habe ich von dir"
+4. `PATCH` – nur bei Abweichung: die freigegebenen Felder
+5. `ACK` – Bestätigung
+
+Übertragen werden ausschließlich die für diesen Kontakt freigegebenen, ausgefüllten Felder.
+
+---
+
+## Sicherheit und Grenzen
+
+- Die direkte Verbindung zwischen zwei Geräten ist verschlüsselt (WebRTC/DTLS).
+- Jedes Gerät hat ein Schlüsselpaar; beim Verbinden weist jede Seite per Signatur nach, dass
+  ihr der genannte Schlüssel gehört. Neue Kontakte entstehen nur über eine offene Einladung.
+- Empfangene Daten werden auf bekannte Textfelder begrenzt.
+- **Beide müssen gleichzeitig online sein.** Es gibt keinen Zwischenspeicher; Änderungen
+  werden beim nächsten gemeinsamen Online-Sein nachgeholt.
+- **Ein Gerät pro Adressbuch.** Dasselbe Adressbuch auf mehreren eigenen Geräten zu führen,
+  wird (noch) nicht unterstützt.
+- Die Daten liegen unverschlüsselt in der Datenbank des Browsers. Wer Zugriff auf das
+  entsperrte Gerät hat, kann sie lesen. Die Sicherungsdatei ist verschlüsselt.
+- Wer einen Einladungscode abfängt, solange die Einladung offen ist, könnte sich an Stelle
+  der eingeladenen Person verbinden. Deshalb nach dem Verbinden prüfen, ob der richtige Name
+  erscheint, und den Code nur an die gemeinte Person geben.
+
+## Lizenz
+
+Siehe [LICENSE](LICENSE).

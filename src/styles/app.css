@@ -923,12 +923,12 @@ button.row {
   justify-content: flex-end;
 }
 
-/* Kurze Rückmeldung am unteren Rand */
+/* Kurze Rückmeldung am oberen Rand, damit sie keine Bedienelemente verdeckt */
 
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(var(--nav-h) + var(--s-4) + env(safe-area-inset-bottom, 0px));
+  top: calc(var(--s-3) + env(safe-area-inset-top, 0px));
   transform: translateX(-50%);
   z-index: 30;
   width: max-content;
@@ -938,12 +938,6 @@ button.row {
   color: var(--c-bg);
   border-radius: var(--radius);
   font-size: var(--text-s);
-}
-
-@media (min-width: 860px) {
-  .toast {
-    bottom: var(--s-5);
-  }
 }
 
 /* Einstieg */
@@ -960,7 +954,7 @@ button.row {
 }
 
 .welcome-mark {
-  width: 56px;
+  width: 78px;
   height: 56px;
   margin-bottom: var(--s-5);
 }
