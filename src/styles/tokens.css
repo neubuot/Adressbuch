@@ -1,0 +1,76 @@
+/*
+ * Design-Tokens: die einzige Stelle, an der Farben, Schrift, Abstände und
+ * Maße festgelegt sind. Alle Ansichten verwenden ausschließlich diese Werte.
+ *
+ * Leitlinie: so wenig Gestaltung wie möglich. Ruhige helle Flächen,
+ * schwarzer Text, genau eine Akzentfarbe für die wichtigste Aktion.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Flächen und Text */
+  --c-bg: #f1efe9;
+  --c-surface: #faf9f5;
+  --c-ink: #141414;
+  --c-ink-2: #55534e;
+  --c-line: #d3d0c8;
+  --c-fill: #e6e3db;
+
+  /* Die eine Akzentfarbe */
+  --c-accent: #ef6a1f;
+  --c-on-accent: #141414;
+
+  /* Nur für unumkehrbare Aktionen und Fehler */
+  --c-danger: #a3230f;
+
+  /* Schrift */
+  --font: 'Helvetica Neue', Helvetica, Arial, system-ui, sans-serif;
+  --text-xs: 0.8125rem;
+  --text-s: 0.9375rem;
+  --text-m: 1.0625rem;
+  --text-l: 1.375rem;
+  --text-xl: 1.75rem;
+  --leading: 1.45;
+
+  /* Abstände im 4-Punkt-Raster */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+
+  /* Maße */
+  --control: 48px;
+  --radius: 3px;
+  --page: 680px;
+  --nav-w: 232px;
+  --nav-h: 60px;
+  --hairline: 1px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --c-bg: #151514;
+    --c-surface: #1f1f1d;
+    --c-ink: #efede7;
+    --c-ink-2: #aaa79f;
+    --c-line: #3b3a36;
+    --c-fill: #2a2927;
+    --c-danger: #ff8d78;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --c-bg: #151514;
+  --c-surface: #1f1f1d;
+  --c-ink: #efede7;
+  --c-ink-2: #aaa79f;
+  --c-line: #3b3a36;
+  --c-fill: #2a2927;
+  --c-danger: #ff8d78;
+}
