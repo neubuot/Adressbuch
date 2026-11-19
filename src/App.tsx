@@ -2,7 +2,7 @@
  * App-Gerüst: Titel, Navigation und die jeweils gewählte Ansicht
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppProvider, useAppContext } from './context/AppContext';
 import { href, useRoute } from './router';
 import { ContactsView } from './views/ContactsView';
@@ -13,6 +13,7 @@ import { MyCardView } from './views/MyCardView';
 import { MoreView } from './views/MoreView';
 import { TagsView } from './views/TagsView';
 import { ExportView } from './views/ExportView';
+import { OnboardingView } from './views/OnboardingView';
 import { Page } from './ui/Page';
 import './styles/tokens.css';
 import './styles/app.css';
@@ -74,6 +75,7 @@ function AppContent() {
   const route = useRoute();
   const mainRef = useRef<HTMLElement>(null);
   const routeKey = route.join('/');
+  const [onboarded, setOnboarded] = useState(false);
 
   const appTitle = buildAppTitle(appState.myCard.firstName, appState.myCard.lastName);
 
@@ -122,6 +124,22 @@ function AppContent() {
           </div>
         </div>
       </div>
+    );
+  }
+
+  // Erster Start: nur nach dem Namen fragen. Die Wiederherstellung einer
+  // Sicherung bleibt ohne diesen Schritt erreichbar.
+  const isEmpty =
+    !appState.myCard.firstName &&
+    !appState.myCard.lastName &&
+    Object.keys(appState.connections).length === 0;
+  const restoring = route[0] === 'mehr' && route[1] === 'sicherung';
+  if (isEmpty && !onboarded && !restoring) {
+    return (
+      <OnboardingView
+        invited={route[0] === 'verbinden' && !!route[1]}
+        onDone={() => setOnboarded(true)}
+      />
     );
   }
 

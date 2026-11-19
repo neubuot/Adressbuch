@@ -82,9 +82,12 @@ export function useInstall(): { state: InstallState; install: () => Promise<bool
  */
 export function registerServiceWorker(): void {
   if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
-  window.addEventListener('load', () => {
+  const register = () => {
     navigator.serviceWorker
       .register(new URL('sw.js', document.baseURI))
       .catch((error) => console.warn('Offline-Betrieb nicht verfügbar', error));
-  });
+  };
+  // Die App startet verzögert; das Ladeereignis kann dann schon vorbei sein
+  if (document.readyState === 'complete') register();
+  else window.addEventListener('load', register, { once: true });
 }
