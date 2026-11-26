@@ -9,11 +9,11 @@
     "dev": "node --watch index.js"
   },
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@types/ws": "^8.5.13",
-    "@vitest/ui": "^4.0.4",
+    "@vitest/ui": "^4.1.12",
     "jsdom": "^27.0.1"
   }
 }
