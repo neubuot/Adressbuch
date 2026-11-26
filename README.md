@@ -102,12 +102,27 @@ Auf Android-Handys mit Chrome geht es auch ohne Datei: **Aus dem Telefonbuch wä
 Geburtstag liefert das Telefonbuch auf diesem Weg nicht. Auf dem iPhone und am Computer
 bietet der Browser diese Auswahl nicht an; dort bleibt die Datei.
 
+Hat der Betreiber es eingerichtet, gibt es außerdem **Aus Google Kontakte holen**: Du meldest
+dich in einem eigenen Fenster bei Google an und erlaubst das Lesen deiner Kontakte. Dein
+Browser holt sie direkt bei Google; der Zugang wird nicht gespeichert.
+
 Vor dem Übernehmen zeigt die App, was schon vorhanden ist. Liest du dieselbe Datei noch
 einmal ein, werden die Einträge aktualisiert und nicht verdoppelt. Gehört ein Eintrag sicher
 zu einem vorhandenen Kontakt (gleiche E-Mail-Adresse oder Telefonnummer), werden die Angaben
 dort ergänzt. Unsichere Treffer (gleicher Name und Ort) führst du nur mit einem Haken
 zusammen. Weichen Angaben voneinander ab, legst du fest, ob die Datei oder der bisherige
 Stand gilt. Was du selbst von Hand geändert hast, bleibt in jedem Fall.
+
+Unter **Mehr → Doppelte Einträge** findest du Paare, die vermutlich dieselbe Person sind. Du
+führst sie zusammen oder bestätigst, dass es verschiedene Personen sind. Beim Zusammenführen
+geht nichts verloren; beim Kontakt steht **Wieder trennen**. Unter **Mehr → Übernommene
+Kontakte** siehst du, woher deine Kontakte stammen, legst fest, welche Quelle bei Abweichungen
+gilt, und kannst einen Import als Ganzes zurücknehmen.
+
+### Welche Version habe ich?
+
+Unter **Mehr → Über diese App** stehen die Version, der Stand und das Datum, z. B.
+`0.3.0 (4e89f7c, 26.11.2026)`. Nenne diese Angabe, wenn du einen Fehler meldest.
 
 ---
 
@@ -176,10 +191,27 @@ Werden beim Bauen fest in die App übernommen. Vorlage: [.env.example](.env.exam
 | --- | --- |
 | `VITE_SIGNALING_URL` | Adresse des Vermittlungsdienstes, falls er getrennt von der App läuft, z. B. `wss://signal.example.org/signal` |
 | `VITE_ICE_SERVERS` | STUN/TURN-Server als JSON-Liste, z. B. mit eigenem TURN-Server |
+| `VITE_GOOGLE_CLIENT_ID` | Kennung für „Aus Google Kontakte holen", siehe unten. Ohne Angabe fehlt diese Quelle. |
 | `PORT` (Dienst) | Port des Vermittlungsdienstes, Standard `8080` |
 | `STATIC_DIR` (Dienst) | Ordner der gebauten App, Standard `../dist`; `off` schaltet die Auslieferung ab |
 
 `GET /healthz` antwortet mit `ok` und eignet sich für die Überwachung.
+
+### Google Kontakte freischalten (freiwillig)
+
+1. In der [Google Cloud Console](https://console.cloud.google.com/) ein Projekt anlegen und die
+   **People API** einschalten.
+2. Den Zustimmungsbildschirm einrichten; als Zugriff genügt
+   `https://www.googleapis.com/auth/contacts.readonly`.
+3. Unter „Anmeldedaten" eine OAuth-Client-ID vom Typ **Webanwendung** anlegen. Als autorisierte
+   JavaScript-Quelle die Adresse der App eintragen (z. B. `https://adressbuch.example.org`), als
+   autorisierte Weiterleitungs-URI dieselbe Adresse mit `/oauth.html`.
+4. Die Client-ID als `VITE_GOOGLE_CLIENT_ID` in `.env` eintragen und neu bauen. Sie ist
+   öffentlich und kein Geheimnis; ein Client-Schlüssel wird nicht gebraucht.
+
+Im Testbetrieb lässt Google nur die Konten zu, die im Zustimmungsbildschirm als Testnutzer
+eingetragen sind. Für alle anderen verlangt Google eine Prüfung der App. Die Kontakte gehen
+direkt von Google an den Browser; der Vermittlungsdienst ist nicht beteiligt.
 
 ### Was der Vermittlungsdienst sieht – und was nicht
 
@@ -292,6 +324,10 @@ Bei verbundenen Kontakten gilt immer die Karte der Person selbst. Importierte Da
 bleiben beim Verbinden erhalten. Der Abgleich beim Import steht in `src/model/dedupe.ts`.
 Weitere E-Mail-Adressen und Telefonnummern einer Quelle, die nicht in die Karte passen,
 liegen in `extra` und zählen beim Abgleich mit.
+
+Zusammengeführte Einträge merkt sich der Kontakt in `merged` (frühere Kennung, Datensätze,
+Notizen, Tags), damit sich das wieder trennen lässt. Paare, die als verschiedene Personen
+bestätigt sind, stehen in `AppState.notDuplicates`.
 
 ### Migration und unterschiedliche Versionen
 

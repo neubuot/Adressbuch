@@ -22,7 +22,8 @@ import { describeShare, PRIVATE_FIELDS, getFieldLabel } from '../model/fields';
 import { describeChange } from '../model/activity';
 import { projectFields } from '../utils/policy';
 import { mailHref, mapHref, phoneHref, saveToAddressBook } from '../model/actions';
-import type { AddressCardField, ContactPrivate, ContactPrivateField, RemoteCard } from '../types';
+import { ADDRESS_CARD_FIELDS, type AddressCardField, type ContactPrivate, type ContactPrivateField, type RemoteCard } from '../types';
+import { mergeRecords } from '../model/merge';
 
 type Dialog = 'revoke' | 'remove' | null;
 
@@ -68,6 +69,35 @@ export const ContactView: React.FC<{ connectionId: string }> = ({ connectionId }
   const hasCard = !!card && Object.keys(card).length > 0;
   const shared = projectFields(appState.myCard, connection.allowedFields);
   const tags = Object.values(appState.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+
+  // Weitere E-Mail-Adressen und Nummern aus den Quellen, die nicht in die Karte passen
+  const shown = new Set(Object.values(card ?? {}).map((value) => String(value).trim().toLowerCase()));
+  const moreEmails: string[] = [];
+  const morePhones: string[] = [];
+  for (const record of Object.values(connection.records ?? {})) {
+    for (const email of record.extra?.emails ?? []) {
+      if (!shown.has(email.toLowerCase()) && !moreEmails.includes(email)) moreEmails.push(email);
+    }
+    for (const phone of record.extra?.phones ?? []) {
+      if (!shown.has(phone.toLowerCase()) && !morePhones.includes(phone)) morePhones.push(phone);
+    }
+  }
+
+  // Bei verbundenen Kontakten: eigene Unterlagen zu Feldern, die die Person nicht freigibt
+  const ownNotes: RemoteCard = {};
+  if (!isLocal && connection.records) {
+    const imported = mergeRecords(connection.records, appState.sources);
+    for (const field of ADDRESS_CARD_FIELDS) {
+      if (imported[field] && !card?.[field]) ownNotes[field] = imported[field];
+    }
+  }
+  const hasOwnNotes = Object.keys(ownNotes).length > 0;
+  const mergedEntries = connection.merged ?? [];
+
+  const split = async (mergedId: string, mergedName: string) => {
+    const newId = await store.splitContact(connectionId, mergedId);
+    notify(newId ? `${mergedName} ist wieder ein eigener Eintrag.` : 'Das hat nicht geklappt.');
+  };
 
   const tel = phoneHref(card);
   const mail = mailHref(card);
@@ -235,6 +265,60 @@ export const ContactView: React.FC<{ connectionId: string }> = ({ connectionId }
           </div>
         )}
       </Section>
+
+      {(moreEmails.length > 0 || morePhones.length > 0) && (
+        <Section title="Weitere Angaben">
+          <dl className="facts">
+            {morePhones.map((phone) => (
+              <div className="fact" key={phone}>
+                <dt>Telefon</dt>
+                <dd>
+                  <a href={`tel:${phone.replace(/[^\d+]/g, '')}`}>{phone}</a>
+                </dd>
+              </div>
+            ))}
+            {moreEmails.map((email) => (
+              <div className="fact" key={email}>
+                <dt>E-Mail</dt>
+                <dd>
+                  <a href={`mailto:${encodeURIComponent(email).replace(/%40/g, '@')}`}>{email}</a>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Section>
+      )}
+
+      {hasOwnNotes && (
+        <Section title="Aus deinen eigenen Unterlagen">
+          <p className="small muted" style={{ marginBottom: 'var(--s-3)' }}>
+            Diese Angaben hast du selbst übernommen. {name} gibt sie dir nicht frei; sie halten sich deshalb nicht von
+            selbst aktuell.
+          </p>
+          <CardFacts card={ownNotes} />
+        </Section>
+      )}
+
+      {mergedEntries.length > 0 && (
+        <Section title="Zusammengeführt">
+          <ul className="list">
+            {mergedEntries.map((entry) => {
+              const mergedName = entry.label || entry.knownName || 'Eintrag';
+              return (
+                <li className="row" style={{ minHeight: 'var(--control)' }} key={entry.id}>
+                  <span className="row-main">
+                    <span className="row-title">{mergedName}</span>
+                    <span className="row-sub">zusammengeführt am {formatDate(entry.at)}</span>
+                  </span>
+                  <button type="button" className="btn btn-quiet" onClick={() => split(entry.id, mergedName)}>
+                    Wieder trennen
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
+      )}
 
       {!isLocal && (
         <Section title={`Was ${name} von mir sieht`}>

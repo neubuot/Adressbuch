@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import wasm from 'vite-plugin-wasm';
 import { createHash } from 'node:crypto';
+import { execSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import type { Plugin } from 'vite';
@@ -43,6 +44,15 @@ function serviceWorkerPrecache(): Plugin {
   };
 }
 
+/** Kurzkennung des Quelltext-Stands für die Versionsanzeige; '' ohne Git */
+function buildCommit(): string {
+  try {
+    return execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {
+    return '';
+  }
+}
+
 export default defineConfig({
   plugins: [
     react(),
@@ -69,6 +79,8 @@ export default defineConfig({
   },
   define: {
     'global': 'globalThis',
+    __BUILD_COMMIT__: JSON.stringify(buildCommit()),
+    __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
   },
   resolve: {
     alias: {

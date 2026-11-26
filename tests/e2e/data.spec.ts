@@ -425,3 +425,105 @@ test('Kontakte aus dem Telefonbuch des Geräts wählen; erneutes Wählen verdopp
   await expect(page.getByText('Konstanz')).toBeVisible();
   await expect(page.getByText('0160 1234567')).toBeVisible();
 });
+
+test('Doppelte Einträge zusammenführen und wieder trennen; Import zurücknehmen; Version sichtbar', async ({ page }) => {
+  await page.goto('/');
+  await onboard(page, 'Max', 'Mustermann');
+  const load = async (name: string, lines: string[]) => {
+    await page.goto('/#/mehr/import');
+    await page.getByLabel('Datei auswählen').setInputFiles({ name, mimeType: 'text/vcard', buffer: Buffer.from(lines.join('\r\n')) });
+  };
+
+  await load('a.vcf', ['BEGIN:VCARD', 'VERSION:3.0', 'N:Sommer;Clara;;;', 'ADR;TYPE=HOME:;;Seeweg 3;Konstanz;;78462;DE', 'END:VCARD', '']);
+  await page.getByRole('button', { name: 'Kontakt übernehmen' }).click();
+  // Gleicher Name und Ort: unsicherer Treffer, bewusst ohne Haken als eigener Eintrag übernehmen
+  await load('b.vcf', ['BEGIN:VCARD', 'VERSION:3.0', 'N:Sommer;Clara;;;', 'TEL;TYPE=CELL:0160 7654321', 'ADR;TYPE=HOME:;;;Konstanz;;;', 'END:VCARD', '']);
+  await expect(page.getByText('bitte prüfen')).toBeVisible();
+  await page.getByRole('button', { name: 'Kontakt übernehmen' }).click();
+  await expect(page.getByText('2 Kontakte', { exact: true })).toBeVisible();
+
+  // Prüfliste
+  await page.goto('/#/mehr');
+  await expect(page.getByRole('link', { name: /Doppelte Einträge/ })).toContainText('1 Paar zu prüfen');
+  await page.getByRole('link', { name: /Doppelte Einträge/ }).click();
+  await page.getByRole('button', { name: 'Zusammenführen' }).click();
+  await expect(page.getByText('Es wurden keine doppelten Einträge gefunden.')).toBeVisible();
+
+  await page.goto('/');
+  await expect(page.getByText('1 Kontakt', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: /Clara Sommer/ }).click();
+  await expect(page.getByText('0160 7654321')).toBeVisible();
+  await expect(page.getByText('Seeweg')).toBeVisible();
+
+  // Wieder trennen
+  await page.getByRole('button', { name: 'Wieder trennen' }).click();
+  await page.goto('/');
+  await expect(page.getByText('2 Kontakte', { exact: true })).toBeVisible();
+  await page.goto('/#/mehr/doppelt');
+  await expect(page.getByText('Es wurden keine doppelten Einträge gefunden.')).toBeVisible();
+
+  // Import als Ganzes zurücknehmen
+  await page.goto('/#/mehr');
+  await page.getByRole('link', { name: /Übernommene Kontakte/ }).click();
+  await page.getByRole('listitem').filter({ hasText: 'b.vcf' }).getByRole('button', { name: 'Zurücknehmen' }).click();
+  await expect(page.getByRole('dialog')).toContainText('1 Eintrag');
+  await page.getByRole('button', { name: 'Import zurücknehmen' }).click();
+  await page.goto('/');
+  await expect(page.getByText('1 Kontakt', { exact: true })).toBeVisible();
+
+  // Version
+  await page.goto('/#/mehr');
+  await expect(page.getByTestId('app-version')).toHaveText(/^\d+\.\d+\.\d+( \([0-9a-f]{7,}, \d{2}\.\d{2}\.\d{4}\))?$/);
+});
+
+test('Kontakte aus Google Kontakte holen (Google wird nachgestellt)', async ({ page, context }) => {
+  // Anmeldung: leitet wie Google mit dem Zugang zurück auf oauth.html
+  await context.route('https://accounts.google.com/**', async (route) => {
+    const url = new URL(route.request().url());
+    expect(url.searchParams.get('response_type')).toBe('token');
+    expect(url.searchParams.get('scope')).toBe('https://www.googleapis.com/auth/contacts.readonly');
+    const redirect = url.searchParams.get('redirect_uri')!;
+    expect(redirect).toMatch(/\/oauth\.html$/);
+    await route.fulfill({
+      status: 302,
+      headers: { location: `${redirect}#access_token=test-zugang&token_type=Bearer&state=${url.searchParams.get('state')}` },
+    });
+  });
+  let calls = 0;
+  await context.route('https://people.googleapis.com/**', async (route) => {
+    expect(route.request().headers()['authorization']).toBe('Bearer test-zugang');
+    const url = new URL(route.request().url());
+    calls++;
+    const first = !url.searchParams.get('pageToken');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify(
+        first
+          ? { connections: [{ resourceName: 'people/c1', names: [{ givenName: 'Clara', familyName: 'Sommer' }], emailAddresses: [{ value: 'clara@example.org' }], organizations: [{ name: 'Eis AG' }] }], nextPageToken: 'seite2' }
+          : { connections: [{ resourceName: 'people/c2', names: [{ givenName: 'Emil', familyName: 'Herbst' }], phoneNumbers: [{ value: '0171 999000' }] }] }
+      ),
+    });
+  });
+
+  await page.goto('/');
+  await onboard(page, 'Max', 'Mustermann');
+  await page.goto('/#/mehr/import');
+  await page.getByRole('button', { name: 'Aus Google Kontakte holen' }).click();
+  await expect(page.getByRole('heading', { name: '2 Kontakte gefunden' })).toBeVisible();
+  expect(calls).toBe(2);
+  await page.getByRole('button', { name: '2 Kontakte übernehmen' }).click();
+  await expect(page.getByText('2 Kontakte', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: /Clara Sommer/ }).click();
+  await expect(page.getByText('Eis AG')).toBeVisible();
+
+  // Der Zugang wird nirgends gespeichert
+  const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }));
+  expect(stored).not.toContain('test-zugang');
+
+  // Erneutes Holen aktualisiert
+  await page.goto('/#/mehr/import');
+  await page.getByRole('button', { name: 'Aus Google Kontakte holen' }).click();
+  await expect(page.getByText('2 aus Google Kontakte schon übernommen, werden aktualisiert')).toBeVisible();
+});

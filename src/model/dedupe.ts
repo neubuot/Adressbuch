@@ -13,6 +13,7 @@
 
 import {
   ADDRESS_CARD_FIELDS,
+  pairKey,
   recordKey,
   type Connection,
   type ContactExtra,
@@ -289,4 +290,76 @@ export function summarizePlan(plan: PlanItem[]): PlanSummary {
     else summary.maybes++;
   }
   return summary;
+}
+
+// --- Doppelte Einträge im Bestand ---
+
+export interface DuplicatePair {
+  aId: string;
+  bId: string;
+  /** sure: gleiche E-Mail, Telefonnummer oder Profiladresse; maybe: bitte prüfen */
+  level: 'sure' | 'maybe';
+  reason: MatchReason;
+}
+
+/** Größere Gruppen (z. B. alle Kollegen mit derselben Zentrale) werden nicht gemeldet */
+const MAX_GROUP = 6;
+
+/**
+ * Sucht im Bestand nach Kontakten, die vermutlich dieselbe Person sind.
+ * Zwei verbundene Kontakte werden nie gemeldet: Das sind zwei Geräte und
+ * damit zwei Personen. Bereits als verschieden bestätigte Paare entfallen.
+ */
+export function findDuplicates(
+  connections: Record<string, Connection>,
+  notDuplicates: Record<string, boolean> | undefined
+): DuplicatePair[] {
+  const strong = new Map<string, { ids: Set<string>; reason: MatchReason }>();
+  const weak = new Map<string, Set<string>>();
+
+  for (const connection of Object.values(connections)) {
+    const sets: Keys[] = [];
+    if (connection.remoteCard) sets.push(keysOf(connection.remoteCard));
+    for (const record of Object.values(connection.records ?? {})) sets.push(keysOf(record.card ?? {}, record.extra));
+    for (const keys of sets) {
+      for (const { key, reason } of keys.strong) {
+        const entry = strong.get(key);
+        if (entry) entry.ids.add(connection.id);
+        else strong.set(key, { ids: new Set([connection.id]), reason });
+      }
+      for (const key of keys.weak) {
+        const ids = weak.get(key);
+        if (ids) ids.add(connection.id);
+        else weak.set(key, new Set([connection.id]));
+      }
+    }
+  }
+
+  const pairs = new Map<string, DuplicatePair>();
+  const consider = (ids: Set<string>, level: DuplicatePair['level'], reason: MatchReason) => {
+    if (ids.size < 2 || ids.size > MAX_GROUP) return;
+    const list = [...ids].sort();
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = connections[list[i]];
+        const b = connections[list[j]];
+        if (!a || !b) continue;
+        if (a.kind !== 'local' && b.kind !== 'local') continue;
+        const key = pairKey(a.id, b.id);
+        if (notDuplicates?.[key]) continue;
+        const known = pairs.get(key);
+        if (!known || (known.level === 'maybe' && level === 'sure')) {
+          pairs.set(key, { aId: a.id, bId: b.id, level, reason });
+        }
+      }
+    }
+  };
+
+  for (const { ids, reason } of strong.values()) {
+    if (ids.size === 2) consider(ids, 'sure', reason);
+    else consider(ids, 'maybe', 'shared');
+  }
+  for (const ids of weak.values()) consider(ids, 'maybe', 'name');
+
+  return [...pairs.values()].sort((x, y) => (x.level === y.level ? 0 : x.level === 'sure' ? -1 : 1));
 }

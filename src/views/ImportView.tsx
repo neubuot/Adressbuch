@@ -9,7 +9,7 @@
  * nur auf Wunsch zusammengeführt.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { store } from '../store/automerge-store';
 import { Page, Section } from '../ui/Page';
@@ -19,6 +19,15 @@ import { parseContactsCsv } from '../io/csv';
 import { contactName, displayNameOfCard, todayIso } from '../model/contact';
 import { MATCH_REASON_TEXT, planImport, summarizePlan, type PlanItem } from '../model/dedupe';
 import { PHONEBOOK_SOURCE_ID, PHONEBOOK_SOURCE_NAME, canPickFromPhonebook, pickFromPhonebook } from '../io/phonebook';
+import { GOOGLE_SOURCE_ID, GOOGLE_SOURCE_NAME, GoogleImportError, canImportFromGoogle, importFromGoogle } from '../io/google';
+
+type Origin = 'file' | 'phone' | 'google';
+
+const ORIGIN_TEXT: Record<Origin, { already: string; leading: string; origin: string }> = {
+  file: { already: 'aus dieser Datei', leading: 'was in dieser Datei steht', origin: '' },
+  phone: { already: 'aus dem Telefonbuch', leading: 'was im Telefonbuch steht', origin: 'dem Telefonbuch' },
+  google: { already: 'aus Google Kontakte', leading: 'was in Google Kontakte steht', origin: 'Google Kontakte' },
+};
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -26,9 +35,14 @@ export const ImportView: React.FC = () => {
   const { appState, notify } = useAppContext();
   const [contacts, setContacts] = useState<ImportedContact[] | null>(null);
   const [fileName, setFileName] = useState('');
-  /** true, wenn die Kontakte aus dem Telefonbuch des Geräts gewählt wurden */
-  const [fromPhone, setFromPhone] = useState(false);
+  /** Woher die gerade angezeigten Kontakte stammen */
+  const [origin, setOrigin] = useState<Origin>('file');
   const phonebook = useMemo(() => canPickFromPhonebook(), []);
+  const google = useMemo(() => canImportFromGoogle(), []);
+  /** Läuft gerade eine Anmeldung bei Google? Dann lässt sie sich hierüber abbrechen. */
+  const [waiting, setWaiting] = useState(false);
+  const abort = useRef<AbortController | null>(null);
+  useEffect(() => () => abort.current?.abort(), []);
   const [unknown, setUnknown] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [tagId, setTagId] = useState('');
@@ -39,8 +53,9 @@ export const ImportView: React.FC = () => {
   const [separate, setSeparate] = useState<Set<number>>(new Set());
   const [leading, setLeading] = useState<'new' | 'old'>('old');
 
-  const sourceId = fromPhone ? PHONEBOOK_SOURCE_ID : `file:${fileName.trim().toLowerCase()}`;
-  const sourceName = fromPhone ? PHONEBOOK_SOURCE_NAME : fileName;
+  const sourceId =
+    origin === 'phone' ? PHONEBOOK_SOURCE_ID : origin === 'google' ? GOOGLE_SOURCE_ID : `file:${fileName.trim().toLowerCase()}`;
+  const sourceName = origin === 'phone' ? PHONEBOOK_SOURCE_NAME : origin === 'google' ? GOOGLE_SOURCE_NAME : fileName;
   const plan = useMemo<PlanItem[]>(
     () => (contacts ? planImport(appState.connections ?? {}, sourceId, contacts) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -87,17 +102,50 @@ export const ImportView: React.FC = () => {
     try {
       const result = await pickFromPhonebook();
       if (result.length === 0) return;
-      setFromPhone(true);
+      setOrigin('phone');
       setContacts(result);
     } catch {
       setError('Das Telefonbuch konnte nicht geöffnet werden. Nimm stattdessen eine Kontaktdatei (.vcf).');
     }
   };
 
+  const pickGoogle = async () => {
+    reset();
+    abort.current?.abort();
+    const controller = new AbortController();
+    abort.current = controller;
+    setWaiting(true);
+    try {
+      // Das Anmeldefenster öffnet sich sofort, noch im selben Klick
+      const result = await importFromGoogle(controller.signal);
+      if (result.length === 0) {
+        setError('In diesem Google-Konto wurden keine Kontakte gefunden.');
+        return;
+      }
+      setOrigin('google');
+      setContacts(result);
+    } catch (problem) {
+      const kind = problem instanceof GoogleImportError ? problem.kind : 'network';
+      if (kind === 'cancelled') return;
+      setError(
+        kind === 'blocked'
+          ? 'Dein Browser hat das Anmeldefenster unterdrückt. Erlaube für diese Seite neue Fenster und versuche es noch einmal.'
+          : kind === 'denied'
+            ? 'Google hat den Zugriff auf deine Kontakte nicht erlaubt. Es wurde nichts übernommen.'
+            : 'Die Kontakte konnten nicht von Google geholt werden. Versuche es später noch einmal.'
+      );
+    } finally {
+      if (abort.current === controller) {
+        abort.current = null;
+        setWaiting(false);
+      }
+    }
+  };
+
   const readFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     reset();
-    setFromPhone(false);
+    setOrigin('file');
     if (!file) return;
     setFileName(file.name);
 
@@ -131,9 +179,9 @@ export const ImportView: React.FC = () => {
   const run = async () => {
     if (!contacts) return;
     setBusy(true);
-    const origin = `Import aus ${fromPhone ? 'dem Telefonbuch' : fileName} am ${todayIso().split('-').reverse().join('.')}`;
+    const dataOrigin = `Import aus ${ORIGIN_TEXT[origin].origin || fileName} am ${todayIso().split('-').reverse().join('.')}`;
     const result = await store.applyImport(
-      { id: sourceId, kind: fromPhone ? 'phone' : 'file', name: sourceName },
+      { id: sourceId, kind: origin, name: sourceName },
       plan.map((item) => ({
         index: item.index,
         contact: item.contact,
@@ -143,7 +191,7 @@ export const ImportView: React.FC = () => {
       {
         leading: hasOverlap ? leading === 'new' : undefined,
         tagIds: tagId ? [tagId] : undefined,
-        dataOrigin: origin,
+        dataOrigin,
       }
     );
     setBusy(false);
@@ -174,6 +222,30 @@ export const ImportView: React.FC = () => {
             <span className="field-hint">
               Dein Gerät zeigt seine Kontakte. Übernommen wird nur, was du dort ankreuzt. Firma und Geburtstag
               liefert das Telefonbuch auf diesem Weg nicht; dafür eignet sich eine Kontaktdatei.
+            </span>
+          </div>
+        )}
+
+        {google && (
+          <div className="field">
+            {waiting ? (
+              <>
+                <p className="small" role="status">
+                  Warte auf deine Anmeldung bei Google im anderen Fenster …
+                </p>
+                <button type="button" className="btn" onClick={() => abort.current?.abort()}>
+                  Abbrechen
+                </button>
+              </>
+            ) : (
+              <button type="button" className="btn" onClick={pickGoogle}>
+                Aus Google Kontakte holen
+              </button>
+            )}
+            <span className="field-hint">
+              Du meldest dich in einem eigenen Fenster bei Google an und erlaubst das Lesen deiner Kontakte. Dein
+              Browser holt sie direkt bei Google; sie laufen über keinen anderen Server. Der Zugang wird nicht
+              gespeichert.
             </span>
           </div>
         )}
@@ -256,7 +328,7 @@ export const ImportView: React.FC = () => {
                 {[
                   summary.fresh > 0 ? `${summary.fresh} neu` : '',
                   summary.updates > 0
-                    ? `${summary.updates} ${fromPhone ? 'aus dem Telefonbuch' : 'aus dieser Datei'} schon übernommen, werden aktualisiert`
+                    ? `${summary.updates} ${ORIGIN_TEXT[origin].already} schon übernommen, werden aktualisiert`
                     : '',
                   summary.merges > 0 ? `${summary.merges} gehören zu vorhandenen Kontakten` : '',
                   summary.maybes > 0 ? `${summary.maybes} könnten zu vorhandenen Kontakten gehören` : '',
@@ -304,7 +376,7 @@ export const ImportView: React.FC = () => {
                 </label>
                 <label className="small" style={{ display: 'block' }}>
                   <input type="radio" name="import-leading" checked={leading === 'new'} onChange={() => setLeading('new')} />{' '}
-                  {fromPhone ? 'was im Telefonbuch steht' : 'was in dieser Datei steht'}
+                  {ORIGIN_TEXT[origin].leading}
                 </label>
                 <span className="field-hint">
                   Was du selbst von Hand geändert hast, bleibt in jedem Fall. Bei verbundenen Kontakten gilt immer deren

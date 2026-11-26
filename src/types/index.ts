@@ -8,7 +8,7 @@
  * wird nichts übertragen, damit kein Gerät Daten des anderen beschädigt.
  */
 export const SCHEMA_VERSION = '2.1.0';
-export const APP_VERSION = '0.2.0';
+export const APP_VERSION = '0.3.0';
 
 export function schemaMajor(version: string | undefined): number {
   const major = parseInt((version || '1').split('.')[0], 10);
@@ -163,6 +163,28 @@ export interface SourceRecord {
   extra?: ContactExtra;
 }
 
+/**
+ * Merkt sich einen Eintrag, der mit diesem Kontakt zusammengeführt wurde,
+ * damit sich das wieder trennen lässt.
+ */
+export interface MergedContact {
+  /** Kennung des früheren Eintrags */
+  id: string;
+  at: string;
+  /** Schlüssel der Datensätze, die von dort stammen */
+  recordKeys: string[];
+  label?: string;
+  knownName?: string;
+  createdAt?: string;
+  private?: Partial<ContactPrivate>;
+  tagIds?: string[];
+}
+
+/** Schlüssel für ein Paar von Kontakten, unabhängig von der Reihenfolge */
+export function pairKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
 export function recordKey(sourceId: string, externalId: string): string {
   return `${sourceId}::${externalId}`;
 }
@@ -195,6 +217,8 @@ export interface Connection {
   remoteCard?: RemoteCard;
   /** Datensätze je Quelle (Schlüssel: recordKey); bleiben auf diesem Gerät */
   records?: Record<string, SourceRecord>;
+  /** Einträge, die mit diesem Kontakt zusammengeführt wurden */
+  merged?: MergedContact[];
   private?: Partial<ContactPrivate>;
   tagIds?: string[];
 }
@@ -218,6 +242,8 @@ export interface AppState {
   tags: Record<string, Tag>;
   /** Importquellen (ab Schema 2.1) */
   sources?: Record<string, ImportSource>;
+  /** Paare (pairKey), die der Nutzer als verschiedene Personen bestätigt hat */
+  notDuplicates?: Record<string, boolean>;
   activity: ActivityEntry[];
   knownPeers: string[];
 }

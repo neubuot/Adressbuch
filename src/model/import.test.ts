@@ -8,10 +8,13 @@ import { AutomergeStore } from '../store/automerge-store';
 import { migrateState, needsMigration } from '../store/migrate';
 import { parseVCards } from '../io/vcard';
 import { fromPickedContacts } from '../io/phonebook';
+import { fromGooglePeople } from '../io/google';
+import { versionLine } from '../version';
 import { LEGACY_SOURCE_ID, MANUAL_SOURCE_ID, SCHEMA_VERSION, type Connection, type ImportSource, type SourceRecord } from '../types';
 import { manualOverrides, mergeRecords, mergeRecordsDetailed } from './merge';
 import {
   fallbackExternalId,
+  findDuplicates,
   nameKey,
   normalizeEmail,
   normalizePhone,
@@ -328,5 +331,160 @@ describe('Auswahl aus dem Telefonbuch', () => {
   it('verkraftet unerwartete Werte', () => {
     expect(fromPickedContacts(undefined as never)).toEqual([]);
     expect(fromPickedContacts([{ name: [42 as never], tel: ['0170 1'], address: ['x' as never] }])).toEqual([{ card: { phoneMobile: '0170 1' } }]);
+  });
+});
+
+describe('Doppelte Einträge im Bestand', () => {
+  const linked = (id: string, card: Connection['remoteCard']): Connection => ({
+    id, kind: 'linked', peerPubKey: 'k', allowedFields: [], storeRemoteCard: true, status: 'offline', remoteCard: card,
+  });
+
+  it('meldet sichere und unsichere Paare, sichere zuerst', () => {
+    const connections = {
+      a: local('a', { firstName: 'Clara', lastName: 'Sommer', emailPrivate: 'clara@example.org' }),
+      b: local('b', { firstName: 'C.', lastName: 'Sommer', emailWork: 'CLARA@example.org' }),
+      c: local('c', { firstName: 'Emil', lastName: 'Herbst', city: 'Hamburg' }),
+      d: local('d', { firstName: 'Emil', lastName: 'Herbst', city: 'Hamburg', phoneMobile: '0171 5550000' }),
+      e: local('e', { firstName: 'Emil', lastName: 'Herbst', city: 'Kiel' }),
+    };
+    const pairs = findDuplicates(connections, undefined);
+    expect(pairs).toEqual([
+      { aId: 'a', bId: 'b', level: 'sure', reason: 'email' },
+      { aId: 'c', bId: 'd', level: 'maybe', reason: 'name' },
+    ]);
+  });
+
+  it('meldet nie zwei verbundene Kontakte und keine bestätigten Paare', () => {
+    const connections = {
+      a: linked('a', { emailPrivate: 'familie@example.org' }),
+      b: linked('b', { emailPrivate: 'familie@example.org' }),
+      c: local('c', { emailPrivate: 'familie@example.org' }),
+    };
+    // drei teilen sich die Adresse: nur unsicher, und nie das Paar der beiden Verbundenen
+    const pairs = findDuplicates(connections, undefined);
+    expect(pairs.map((pair) => `${pair.aId}${pair.bId}:${pair.level}`).sort()).toEqual(['ac:maybe', 'bc:maybe']);
+    expect(findDuplicates(connections, { 'a|c': true, 'b|c': true })).toEqual([]);
+  });
+});
+
+describe('Zusammenführen, Trennen und Zurücknehmen im Speicher', () => {
+  let store: AutomergeStore;
+  const fileA = { id: 'file:a.vcf', kind: 'file' as const, name: 'a.vcf' };
+  const fileB = { id: 'file:b.vcf', kind: 'file' as const, name: 'b.vcf' };
+
+  const add = (source: typeof fileA, incoming: IncomingContact[]) =>
+    store.applyImport(
+      source,
+      incoming.map((contact, index) => ({ index, contact, externalId: contact.externalId ?? `x${index}` }))
+    );
+  const all = () => Object.values(store.getDoc().connections);
+  const byFirst = (name: string) => all().find((c) => c.remoteCard?.firstName === name)!;
+
+  beforeEach(async () => {
+    store = new AutomergeStore();
+    await add(fileA, [{ card: { firstName: 'Clara', lastName: 'Sommer', city: 'Konstanz' }, notes: 'Segelt gern' }]);
+    await add(fileB, [{ card: { firstName: 'Klara', lastName: 'Sommer', phoneMobile: '0160 1' }, notes: 'Vom Verein' }]);
+  });
+
+  it('führt zusammen, ohne etwas zu verlieren, und trennt wieder sauber', async () => {
+    const keep = byFirst('Clara');
+    const drop = byFirst('Klara');
+    await store.addTag('t1', 'Verein', '#000');
+    await store.setConnectionTags(drop.id, ['t1']);
+
+    expect(await store.mergeContacts(keep.id, drop.id)).toBe(true);
+    expect(all()).toHaveLength(1);
+    const merged = store.getDoc().connections[keep.id];
+    expect(merged.remoteCard).toMatchObject({ firstName: 'Clara', city: 'Konstanz', phoneMobile: '0160 1' });
+    expect(merged.private?.notes).toBe('Segelt gern\n\nVom Verein');
+    expect(merged.tagIds).toEqual(['t1']);
+    expect(merged.merged).toHaveLength(1);
+
+    const newId = await store.splitContact(keep.id, drop.id);
+    expect(newId).toBe(drop.id);
+    expect(all()).toHaveLength(2);
+    const restored = store.getDoc().connections[drop.id];
+    expect(restored.remoteCard).toEqual({ firstName: 'Klara', lastName: 'Sommer', phoneMobile: '0160 1' });
+    expect(restored.private?.notes).toBe('Vom Verein');
+    expect(restored.tagIds).toEqual(['t1']);
+    expect(store.getDoc().connections[keep.id].remoteCard?.phoneMobile).toBeUndefined();
+    expect(store.getDoc().connections[keep.id].merged).toHaveLength(0);
+    // Das getrennte Paar wird nicht wieder als doppelt gemeldet
+    expect(findDuplicates(store.getDoc().connections, store.getDoc().notDuplicates)).toEqual([]);
+  });
+
+  it('führt nie einen verbundenen Kontakt in einen anderen über', async () => {
+    await store.addConnection('LINK-1', 'key', []);
+    expect(await store.mergeContacts(byFirst('Clara').id, 'LINK-1')).toBe(false);
+    expect(await store.mergeContacts('LINK-1', byFirst('Clara').id)).toBe(true);
+    expect(store.getDoc().connections['LINK-1'].kind).toBe('linked');
+    expect(store.getDoc().connections['LINK-1'].remoteCard).toBeUndefined();
+  });
+
+  it('nimmt einen Import zurück: reine Einträge verschwinden, zusammengeführte behalten den Rest', async () => {
+    await add(fileB, [{ card: { firstName: 'Dirk', lastName: 'Winter' }, externalId: 'dirk' }]);
+    await store.mergeContacts(byFirst('Clara').id, byFirst('Klara').id);
+    expect(store.previewUndoImport(fileB.id)).toEqual({ removed: 1, kept: 1 });
+
+    expect(await store.undoImport(fileB.id)).toEqual({ removed: 1, kept: 1 });
+    expect(all()).toHaveLength(1);
+    expect(all()[0].remoteCard).toEqual({ firstName: 'Clara', lastName: 'Sommer', city: 'Konstanz' });
+    expect(all()[0].merged).toHaveLength(0);
+    expect(store.getDoc().sources?.[fileB.id]).toBeUndefined();
+  });
+
+  it('die führende Quelle lässt sich nachträglich wechseln', async () => {
+    await store.mergeContacts(byFirst('Clara').id, byFirst('Klara').id);
+    expect(all()[0].remoteCard?.firstName).toBe('Clara');
+    await store.setLeadingSource(fileB.id);
+    expect(all()[0].remoteCard?.firstName).toBe('Klara');
+    expect(all()[0].remoteCard?.city).toBe('Konstanz');
+  });
+});
+
+describe('Google Kontakte', () => {
+  it('ordnet die Angaben eines Kontakts zu', () => {
+    const [clara, ...rest] = fromGooglePeople([
+      {
+        resourceName: 'people/c123',
+        names: [{ givenName: 'Clara', familyName: 'Sommer', honorificPrefix: 'Dr.' }],
+        nicknames: [{ value: 'Clari' }],
+        emailAddresses: [
+          { value: 'c.sommer@firma.example', type: 'work' },
+          { value: 'clara@example.org', type: 'home' },
+          { value: 'dritte@example.org', type: 'other' },
+        ],
+        phoneNumbers: [{ value: '+49 160 1234567', type: 'mobile' }, { value: '07531 2', type: 'work' }, { value: '07531 3' }],
+        addresses: [{ streetAddress: 'Seeweg 3\nHinterhaus', city: 'Konstanz', postalCode: '78462', countryCode: 'DE' }],
+        organizations: [{ name: 'Eis AG', title: 'Leitung', department: 'Vertrieb' }],
+        birthdays: [{ date: { year: 1985, month: 11, day: 4 } }],
+        urls: [{ value: 'https://www.linkedin.com/in/clara' }, { value: 'https://clara.example' }],
+        biographies: [{ value: 'Segelt gern' }],
+      },
+      { resourceName: 'people/c9', birthdays: [{ date: { month: 2, day: 29 } }], names: [{ displayName: 'Nur Anzeige' }] },
+      { resourceName: 'people/leer' },
+      null as never,
+    ]);
+    expect(clara).toEqual({
+      externalId: 'people/c123',
+      notes: 'Segelt gern',
+      extra: { emails: ['dritte@example.org'], phones: ['07531 3'] },
+      card: {
+        firstName: 'Clara', lastName: 'Sommer', titlePrefix: 'Dr.', nickname: 'Clari',
+        emailPrivate: 'clara@example.org', emailWork: 'c.sommer@firma.example',
+        phoneMobile: '+49 160 1234567', phoneWork: '07531 2',
+        street: 'Seeweg', houseNumber: '3', city: 'Konstanz', postalCode: '78462', country: 'DE',
+        organization: 'Eis AG', position: 'Leitung', department: 'Vertrieb',
+        birthday: '1985-11-04', linkedin: 'https://www.linkedin.com/in/clara', website: 'https://clara.example',
+      },
+    });
+    expect(rest).toEqual([{ externalId: 'people/c9', card: { lastName: 'Nur Anzeige', birthday: '--02-29' } }]);
+  });
+});
+
+describe('Versionsanzeige', () => {
+  it('nennt Version, Stand und Datum, soweit bekannt', () => {
+    expect(versionLine({ version: '0.3.0', commit: '4e89f7c', builtAt: '2026-11-26', schema: '2.1.0' })).toBe('0.3.0 (4e89f7c, 26.11.2026)');
+    expect(versionLine({ version: '0.3.0', commit: '', builtAt: '', schema: '2.1.0' })).toBe('0.3.0');
   });
 });
