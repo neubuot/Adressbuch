@@ -137,7 +137,8 @@ export const ContactView: React.FC<{ connectionId: string }> = ({ connectionId }
     for (const [key, value] of Object.entries(editValues)) {
       if (typeof value === 'string' && value.trim()) cleaned[key as AddressCardField] = value.trim();
     }
-    await store.updateConnection(connectionId, { remoteCard: cleaned });
+    if (isLocal) await store.editLocalCard(connectionId, cleaned);
+    else await store.updateConnection(connectionId, { remoteCard: cleaned });
     setEditing(false);
     notify('Gespeichert.');
   };

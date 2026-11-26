@@ -7,7 +7,7 @@
  * zwei Geräte Daten austauschen dürfen: Bei unterschiedlicher Hauptversion
  * wird nichts übertragen, damit kein Gerät Daten des anderen beschädigt.
  */
-export const SCHEMA_VERSION = '2.0.0';
+export const SCHEMA_VERSION = '2.1.0';
 export const APP_VERSION = '0.2.0';
 
 export function schemaMajor(version: string | undefined): number {
@@ -125,6 +125,48 @@ export const CONTACT_PRIVATE_FIELDS = [
 
 export type ContactPrivateField = (typeof CONTACT_PRIVATE_FIELDS)[number];
 
+/**
+ * Woher importierte Angaben stammen. `rank` legt fest, welche Quelle bei
+ * abweichenden Angaben gilt (kleiner gewinnt). Eigene Eingaben von Hand
+ * gehen immer vor.
+ */
+export type ImportSourceKind = 'manual' | 'legacy' | 'file' | 'phone' | 'google' | 'linkedin';
+
+export interface ImportSource {
+  id: string;
+  kind: ImportSourceKind;
+  name: string;
+  rank: number;
+  lastImportAt?: string;
+}
+
+export const MANUAL_SOURCE_ID = 'manual';
+export const LEGACY_SOURCE_ID = 'legacy';
+
+/** Weitere Angaben einer Quelle, die nicht in die Karte passen */
+export interface ContactExtra {
+  emails?: string[];
+  phones?: string[];
+}
+
+/**
+ * Der Stand eines Kontakts in einer Quelle, unverändert abgelegt.
+ * Die angezeigte Karte eines nicht verbundenen Kontakts wird aus allen
+ * Datensätzen berechnet (siehe model/merge.ts).
+ */
+export interface SourceRecord {
+  sourceId: string;
+  /** Kennung des Kontakts in der Quelle */
+  externalId: string;
+  importedAt: string;
+  card: RemoteCard;
+  extra?: ContactExtra;
+}
+
+export function recordKey(sourceId: string, externalId: string): string {
+  return `${sourceId}::${externalId}`;
+}
+
 export interface Tag {
   id: string;
   name: string;
@@ -151,6 +193,8 @@ export interface Connection {
   /** true, wenn das Gerät des Kontakts eine nicht passende App-Version nutzt */
   incompatible?: boolean;
   remoteCard?: RemoteCard;
+  /** Datensätze je Quelle (Schlüssel: recordKey); bleiben auf diesem Gerät */
+  records?: Record<string, SourceRecord>;
   private?: Partial<ContactPrivate>;
   tagIds?: string[];
 }
@@ -172,6 +216,8 @@ export interface AppState {
   myCard: AddressCard;
   connections: Record<string, Connection>;
   tags: Record<string, Tag>;
+  /** Importquellen (ab Schema 2.1) */
+  sources?: Record<string, ImportSource>;
   activity: ActivityEntry[];
   knownPeers: string[];
 }

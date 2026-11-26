@@ -345,3 +345,44 @@ test('Verschlüsselte Sicherung lässt sich auf einem anderen Gerät wiederherst
   await first.context.close();
   await second.context.close();
 });
+
+test('Dieselbe Datei zweimal einlesen verdoppelt nichts; eine zweite Datei ergänzt vorhandene Kontakte', async ({ page }) => {
+  await page.goto('/');
+  await onboard(page, 'Max', 'Mustermann');
+
+  const vcf = [
+    'BEGIN:VCARD', 'VERSION:3.0', 'N:Sommer;Clara;;;', 'EMAIL;TYPE=HOME:clara@example.org', 'ADR;TYPE=HOME:;;Seeweg 3;Konstanz;;78462;DE', 'END:VCARD',
+    'BEGIN:VCARD', 'VERSION:3.0', 'N:Winter;Dirk;;;', 'ORG:Eis AG', 'END:VCARD', '',
+  ].join('\r\n');
+  const load = async (name: string, text: string) => {
+    await page.goto('/#/mehr/import');
+    await page.getByLabel('Datei auswählen').setInputFiles({ name, mimeType: 'text/vcard', buffer: Buffer.from(text) });
+  };
+
+  await load('kontakte.vcf', vcf);
+  await page.getByRole('button', { name: '2 Kontakte übernehmen' }).click();
+  await expect(page.getByText('2 Kontakte', { exact: true })).toBeVisible();
+
+  // Zweites Einlesen derselben Datei: wird als vorhanden erkannt
+  await load('kontakte.vcf', vcf);
+  await expect(page.getByRole('heading', { name: 'Schon vorhanden' })).toBeVisible();
+  await expect(page.getByText('2 aus dieser Datei schon übernommen, werden aktualisiert')).toBeVisible();
+  await page.getByRole('button', { name: '2 Kontakte übernehmen' }).click();
+  await expect(page.getByText('2 Kontakte', { exact: true })).toBeVisible();
+
+  // Andere Datei, gleiche E-Mail, andere Stadt und zusätzlich eine Nummer
+  const other = [
+    'BEGIN:VCARD', 'VERSION:3.0', 'N:Sommer;Clara;;;', 'EMAIL;TYPE=WORK:CLARA@example.org', 'TEL;TYPE=CELL:0160 7654321',
+    'ADR;TYPE=HOME:;;Hafenstr. 1;Lindau;;88131;DE', 'END:VCARD', '',
+  ].join('\r\n');
+  await load('neu.vcf', other);
+  await expect(page.getByText('1 gehören zu vorhandenen Kontakten')).toBeVisible();
+  await expect(page.getByText('gleiche E-Mail-Adresse')).toBeVisible();
+  await page.getByLabel('was in dieser Datei steht').check();
+  await page.getByRole('button', { name: 'Kontakt übernehmen' }).click();
+
+  await expect(page.getByText('2 Kontakte', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: /Clara Sommer/ }).click();
+  await expect(page.getByText('Lindau')).toBeVisible();
+  await expect(page.getByText('0160 7654321')).toBeVisible();
+});
