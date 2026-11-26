@@ -7,15 +7,22 @@ import { db, type StoredDocument } from './db';
 import {
   ADDRESS_CARD_FIELDS,
   CONTACT_PRIVATE_FIELDS,
+  LEGACY_SOURCE_ID,
+  MANUAL_SOURCE_ID,
   SCHEMA_VERSION,
   createEmptyCard,
+  recordKey,
   type ActivityEntry,
   type AddressCard,
   type AppState,
   type Connection,
   type ContactPrivate,
+  type ImportSource,
   type RemoteCard,
+  type SourceRecord,
 } from '../types';
+import { manualOverrides, mergeRecords } from '../model/merge';
+import type { IncomingContact } from '../model/dedupe';
 import { createUuid, isFromNewerApp, migrateState, needsMigration } from './migrate';
 import { sanitizeRemoteCard } from '../utils/policy';
 import { displayNameOfCard } from '../model/contact';
@@ -37,6 +44,63 @@ function plain<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
 }
 
+/** Ein Eintrag eines Imports, wie ihn die Vorschau freigegeben hat */
+export interface ImportItem {
+  /** Position im Import; andere Einträge verweisen mit new:<index> darauf */
+  index: number;
+  contact: IncomingContact;
+  externalId: string;
+  /** Vorhandener Kontakt oder new:<index>; ohne Angabe entsteht ein neuer Eintrag */
+  targetId?: string;
+}
+
+export interface ImportOptions {
+  /** true: Bei abweichenden Angaben gilt diese Quelle vor den anderen Importquellen */
+  leading?: boolean;
+  tagIds?: string[];
+  dataOrigin?: string;
+}
+
+export interface ImportResult {
+  created: number;
+  updated: number;
+  merged: number;
+  ids: string[];
+}
+
+function ensureLegacySource(doc: AppState): void {
+  if (!doc.sources) doc.sources = {};
+  if (!doc.sources[LEGACY_SOURCE_ID]) {
+    doc.sources[LEGACY_SOURCE_ID] = { id: LEGACY_SOURCE_ID, kind: 'legacy', name: 'Frühere Importe', rank: 1000 };
+  }
+}
+
+/**
+ * Berechnet die angezeigte Karte eines nicht verbundenen Kontakts neu.
+ * Bei verbundenen Kontakten stammt die Karte von der anderen Person und
+ * bleibt unberührt.
+ */
+function recomputeCard(doc: AppState, connection: Connection): void {
+  if (connection.kind !== 'local' || !connection.records) return;
+  const card = mergeRecords(plain(connection.records), doc.sources ? plain(doc.sources) : undefined);
+  connection.remoteCard = card;
+  const name = displayNameOfCard(card);
+  if (name && connection.knownName !== name) connection.knownName = name;
+}
+
+function cleanExtra(extra: IncomingContact['extra']): SourceRecord['extra'] | undefined {
+  if (!extra) return undefined;
+  const clean = (list: string[] | undefined) =>
+    (list ?? [])
+      .filter((value) => typeof value === 'string' && value.trim() !== '')
+      .map((value) => value.trim().slice(0, 500))
+      .slice(0, 20);
+  const emails = clean(extra.emails);
+  const phones = clean(extra.phones);
+  if (emails.length === 0 && phones.length === 0) return undefined;
+  return { ...(emails.length > 0 ? { emails } : {}), ...(phones.length > 0 ? { phones } : {}) };
+}
+
 export class AutomergeStore {
   private doc: Automerge.Doc<AppState>;
   private docId = 'myCard';
@@ -54,6 +118,7 @@ export class AutomergeStore {
       myCard: createEmptyCard(createUuid()),
       connections: {},
       tags: {},
+      sources: {},
       activity: [],
       knownPeers: [],
     };
@@ -209,37 +274,159 @@ export class AutomergeStore {
   }
 
   /**
-   * Legt nicht verbundene Einträge an (z. B. aus einem Import).
-   * Gibt die neuen IDs zurück.
+   * Übernimmt einen Import. Jeder Eintrag wird als Datensatz seiner Quelle
+   * abgelegt: an einem vorhandenen Kontakt (targetId) oder an einem neuen
+   * nicht verbundenen Eintrag. Ein erneuter Import derselben Quelle ersetzt
+   * nur deren Datensatz; nichts wird verdoppelt und nichts gelöscht.
    */
-  async addLocalContacts(
-    entries: Array<{ card: RemoteCard; private?: Partial<ContactPrivate>; tagIds?: string[] }>
-  ): Promise<string[]> {
-    const ids: string[] = [];
-    await this.change(`${entries.length} Kontakt(e) importiert`, (doc) => {
+  async applyImport(
+    source: Pick<ImportSource, 'id' | 'kind' | 'name'>,
+    items: ImportItem[],
+    options: ImportOptions = {}
+  ): Promise<ImportResult> {
+    const result: ImportResult = { created: 0, updated: 0, merged: 0, ids: [] };
+    if (items.length === 0) return result;
+
+    await this.change(`${items.length} Kontakt(e) aus ${source.name} übernommen`, (doc) => {
       const now = new Date().toISOString();
-      for (const entry of entries) {
-        const id = `local-${createUuid()}`;
-        const card = sanitizeRemoteCard(entry.card);
-        const connection: Connection = {
-          id,
-          kind: 'local',
-          peerPubKey: '',
-          allowedFields: [],
-          storeRemoteCard: true,
-          status: 'offline',
-          createdAt: now,
-          remoteCard: card,
-        };
-        const name = displayNameOfCard(card);
-        if (name) connection.knownName = name;
-        if (entry.private) connection.private = plain(entry.private);
-        if (entry.tagIds && entry.tagIds.length > 0) connection.tagIds = [...entry.tagIds];
-        doc.connections[id] = connection;
-        ids.push(id);
+      if (!doc.sources) doc.sources = {};
+
+      // Rang der Quelle: führend vor allen anderen, sonst hinter den vorhandenen
+      const otherRanks = Object.values(doc.sources)
+        .filter((entry) => entry.id !== source.id && entry.kind !== 'legacy')
+        .map((entry) => entry.rank);
+      const existing = doc.sources[source.id];
+      if (!existing) {
+        const rank = options.leading ? Math.min(0, ...otherRanks) - 1 : Math.max(0, ...otherRanks) + 1;
+        doc.sources[source.id] = { id: source.id, kind: source.kind, name: source.name, rank, lastImportAt: now };
+      } else {
+        if (options.leading === true && otherRanks.some((rank) => rank <= existing.rank)) {
+          existing.rank = Math.min(0, ...otherRanks) - 1;
+        } else if (options.leading === false && otherRanks.some((rank) => rank >= existing.rank)) {
+          existing.rank = Math.max(0, ...otherRanks) + 1;
+        }
+        existing.lastImportAt = now;
+        if (existing.name !== source.name) existing.name = source.name;
       }
+
+      const resolved = new Map<string, string>();
+      const touched = new Set<string>();
+
+      for (const item of [...items].sort((a, b) => a.index - b.index)) {
+        const card = sanitizeRemoteCard(item.contact.card);
+        const record: SourceRecord = {
+          sourceId: source.id,
+          externalId: item.externalId,
+          importedAt: now,
+          card,
+        };
+        const extra = cleanExtra(item.contact.extra);
+        if (extra) record.extra = extra;
+        const key = recordKey(source.id, item.externalId);
+
+        let targetId = item.targetId;
+        if (targetId && targetId.startsWith('new:')) targetId = resolved.get(targetId);
+        let connection = targetId ? doc.connections[targetId] : undefined;
+
+        if (connection) {
+          const known = !!connection.records?.[key];
+          if (!connection.records) {
+            // Bestand ohne Datensätze: bisherige Karte als eigener Datensatz sichern
+            connection.records = {};
+            if (connection.kind === 'local' && connection.remoteCard && Object.keys(connection.remoteCard).length > 0) {
+              ensureLegacySource(doc);
+              connection.records[recordKey(LEGACY_SOURCE_ID, connection.id)] = {
+                sourceId: LEGACY_SOURCE_ID,
+                externalId: connection.id,
+                importedAt: connection.createdAt || now,
+                card: plain(connection.remoteCard),
+              };
+            }
+          }
+          connection.records[key] = record;
+          if (known) result.updated++;
+          else result.merged++;
+        } else {
+          const id = `local-${createUuid()}`;
+          doc.connections[id] = {
+            id,
+            kind: 'local',
+            peerPubKey: '',
+            allowedFields: [],
+            storeRemoteCard: true,
+            status: 'offline',
+            createdAt: now,
+            remoteCard: { ...card },
+            records: { [key]: record },
+          };
+          connection = doc.connections[id];
+          if (options.dataOrigin) connection.private = { dataOrigin: options.dataOrigin };
+          result.created++;
+        }
+
+        resolved.set(`new:${item.index}`, connection.id);
+        touched.add(connection.id);
+
+        if (item.contact.notes) {
+          if (!connection.private) connection.private = {};
+          if (!connection.private.notes) connection.private.notes = item.contact.notes.slice(0, 5000);
+        }
+        if (options.tagIds && options.tagIds.length > 0) {
+          if (!connection.tagIds) connection.tagIds = [];
+          for (const tagId of options.tagIds) {
+            if (!connection.tagIds.includes(tagId)) connection.tagIds.push(tagId);
+          }
+        }
+      }
+
+      // Der Rang kann sich geändert haben: alle Kontakte mit Datensätzen dieser Quelle neu berechnen
+      for (const connection of Object.values(doc.connections)) {
+        if (touched.has(connection.id)) {
+          recomputeCard(doc, connection);
+        } else if (connection.kind === 'local' && connection.records) {
+          if (Object.values(connection.records).some((entry) => entry.sourceId === source.id)) {
+            recomputeCard(doc, connection);
+          }
+        }
+      }
+      result.ids = [...touched];
     });
-    return ids;
+
+    return result;
+  }
+
+  /**
+   * Speichert eine von Hand bearbeitete Karte eines nicht verbundenen
+   * Kontakts. Festgehalten wird nur, was von den Importquellen abweicht;
+   * alle anderen Felder bleiben bei späteren Importen aktuell.
+   */
+  async editLocalCard(id: string, edited: RemoteCard): Promise<void> {
+    const existing = this.doc.connections[id];
+    if (!existing || existing.kind !== 'local') return;
+
+    await this.change(`Eintrag ${id} bearbeitet`, (doc) => {
+      const connection = doc.connections[id];
+      if (!connection) return;
+      if (!connection.records) connection.records = {};
+
+      const key = recordKey(MANUAL_SOURCE_ID, id);
+      const overrides = manualOverrides(
+        edited,
+        plain(connection.records),
+        doc.sources ? plain(doc.sources) : undefined
+      );
+      if (overrides) {
+        connection.records[key] = {
+          sourceId: MANUAL_SOURCE_ID,
+          externalId: id,
+          importedAt: new Date().toISOString(),
+          card: overrides,
+        };
+      } else if (connection.records[key]) {
+        delete connection.records[key];
+      }
+      recomputeCard(doc, connection);
+    });
   }
 
   /**
@@ -366,6 +553,25 @@ export class AutomergeStore {
         }
       }
       if (snapshot.knownName && !linked.knownName) linked.knownName = snapshot.knownName;
+
+      // Die importierten Angaben bleiben als Datensätze erhalten, damit nichts
+      // verloren geht, was die Person selbst (noch) nicht freigegeben hat.
+      const records: Record<string, SourceRecord> = snapshot.records ? { ...snapshot.records } : {};
+      if (Object.keys(records).length === 0 && snapshot.remoteCard && Object.keys(snapshot.remoteCard).length > 0) {
+        ensureLegacySource(doc);
+        records[recordKey(LEGACY_SOURCE_ID, localId)] = {
+          sourceId: LEGACY_SOURCE_ID,
+          externalId: localId,
+          importedAt: snapshot.createdAt || new Date().toISOString(),
+          card: snapshot.remoteCard,
+        };
+      }
+      if (Object.keys(records).length > 0) {
+        if (!linked.records) linked.records = {};
+        for (const [key, record] of Object.entries(records)) {
+          if (!linked.records[key]) linked.records[key] = record;
+        }
+      }
 
       delete doc.connections[localId];
     });

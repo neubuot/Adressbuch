@@ -5,7 +5,7 @@
  * Entwurf oder einfaches Objekt) und sind beliebig oft ausführbar.
  */
 
-import { ADDRESS_CARD_FIELDS, SCHEMA_VERSION, schemaMajor } from '../types';
+import { ADDRESS_CARD_FIELDS, LEGACY_SOURCE_ID, SCHEMA_VERSION, recordKey, schemaMajor } from '../types';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -91,7 +91,7 @@ export function isFromNewerApp(doc: any): boolean {
 export function needsMigration(doc: any): boolean {
   if (isFromNewerApp(doc)) return false;
   if (doc.schemaVersion !== SCHEMA_VERSION) return true;
-  if (!doc.tags || !doc.activity || !doc.connections) return true;
+  if (!doc.tags || !doc.activity || !doc.connections || !doc.sources) return true;
   return ADDRESS_CARD_FIELDS.some((field) => typeof doc.myCard?.[field] !== 'string');
 }
 
@@ -151,5 +151,40 @@ export function migrateState(doc: any): void {
   }
   if (!card.custom) card.custom = {};
 
+  migrateRecords(doc);
+
   doc.schemaVersion = SCHEMA_VERSION;
+}
+
+/**
+ * Schema 2.1: Nicht verbundene Einträge aus früheren Importen bekommen
+ * einen Datensatz der Quelle "Frühere Importe". Die angezeigte Karte bleibt
+ * dabei unverändert.
+ */
+function migrateRecords(doc: any): void {
+  if (!doc.sources) doc.sources = {};
+
+  for (const id of Object.keys(doc.connections)) {
+    const connection = doc.connections[id];
+    if (connection.kind !== 'local' || connection.records) continue;
+    const card = connection.remoteCard ? JSON.parse(JSON.stringify(connection.remoteCard)) : {};
+    if (Object.keys(card).length === 0) continue;
+
+    if (!doc.sources[LEGACY_SOURCE_ID]) {
+      doc.sources[LEGACY_SOURCE_ID] = {
+        id: LEGACY_SOURCE_ID,
+        kind: 'legacy',
+        name: 'Frühere Importe',
+        rank: 1000,
+      };
+    }
+    connection.records = {
+      [recordKey(LEGACY_SOURCE_ID, id)]: {
+        sourceId: LEGACY_SOURCE_ID,
+        externalId: id,
+        importedAt: String(connection.createdAt || new Date().toISOString()),
+        card,
+      },
+    };
+  }
 }

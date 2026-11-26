@@ -2,12 +2,22 @@
  * vCard lesen und schreiben (Format der Telefonbücher von Handy und Computer)
  */
 
-import type { RemoteCard } from '../types';
+import type { ContactExtra, RemoteCard } from '../types';
 import { splitStreet } from '../store/migrate';
 
 export interface ImportedContact {
   card: RemoteCard;
   notes?: string;
+  /** Weitere E-Mails und Telefonnummern, die nicht in die Karte passen */
+  extra?: ContactExtra;
+  /** Kennung in der Quelle (vCard: UID), falls vorhanden */
+  externalId?: string;
+}
+
+function addExtra(contact: ImportedContact, kind: 'emails' | 'phones', value: string): void {
+  if (!contact.extra) contact.extra = {};
+  const list = contact.extra[kind] ?? (contact.extra[kind] = []);
+  if (!list.includes(value) && list.length < 20) list.push(value.slice(0, 500));
 }
 
 function escapeValue(value: string): string {
@@ -195,6 +205,10 @@ export function parseVCards(text: string): ImportedContact[] {
         if (paramText.includes('WORK') && !card.emailWork) card.emailWork = single;
         else if (!card.emailPrivate) card.emailPrivate = single;
         else if (!card.emailWork) card.emailWork = single;
+        else addExtra(current, 'emails', single);
+        break;
+      case 'UID':
+        current.externalId = single.slice(0, 200);
         break;
       case 'TEL': {
         const number = single.replace(/^tel:/i, '');
@@ -206,6 +220,8 @@ export function parseVCards(text: string): ImportedContact[] {
           card.phoneMobile = number;
         } else if (!card.phoneWork) {
           card.phoneWork = number;
+        } else {
+          addExtra(current, 'phones', number);
         }
         break;
       }

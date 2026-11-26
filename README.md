@@ -97,6 +97,13 @@ Unter **Mehr → Vorhandene Kontakte übernehmen** kannst du Kontakte aus dem Te
 verbunden". Wenn du jemanden davon später einlädst, wird aus dem Eintrag eine echte
 Verbindung; deine Notizen und Tags bleiben erhalten.
 
+Vor dem Übernehmen zeigt die App, was schon vorhanden ist. Liest du dieselbe Datei noch
+einmal ein, werden die Einträge aktualisiert und nicht verdoppelt. Gehört ein Eintrag sicher
+zu einem vorhandenen Kontakt (gleiche E-Mail-Adresse oder Telefonnummer), werden die Angaben
+dort ergänzt. Unsichere Treffer (gleicher Name und Ort) führst du nur mit einem Haken
+zusammen. Weichen Angaben voneinander ab, legst du fest, ob die Datei oder der bisherige
+Stand gilt. Was du selbst von Hand geändert hast, bleibt in jedem Fall.
+
 ---
 
 ## Was die App kann
@@ -240,7 +247,7 @@ prüft das.
 
 ## Datenmodell
 
-Schemaversion **2.0.0** (`src/types/index.ts`). Felder und ihre Beschriftungen stehen in
+Schemaversion **2.1.0** (`src/types/index.ts`). Felder und ihre Beschriftungen stehen in
 `src/model/fields.ts`; die Spalte „Export" ist der Name in CSV- und JSON-Exporten.
 
 ### Eigene Karte (pro Kontakt freigebbar)
@@ -267,11 +274,28 @@ Schemaversion **2.0.0** (`src/types/index.ts`). Felder und ihre Beschriftungen s
 | `source`, `dataOrigin` | `quelle`, `datenherkunft` |
 | `gdprConsentAt` | `einwilligung_dsgvo_am` |
 
+### Importquellen und Datensätze (bleiben auf dem Gerät)
+
+Jede Importquelle (`AppState.sources`) legt ihren Stand unverändert als Datensatz am Kontakt
+ab (`Connection.records`, Schlüssel `Quelle::Kennung`). Die angezeigte Karte eines nicht
+verbundenen Kontakts wird daraus berechnet (`src/model/merge.ts`):
+
+1. eigene Eingabe von Hand (Quelle `manual`, enthält nur die abweichenden Felder)
+2. Importquellen nach `rank`, kleiner gewinnt; ein leerer Wert überschreibt nichts
+
+Bei verbundenen Kontakten gilt immer die Karte der Person selbst. Importierte Datensätze
+bleiben beim Verbinden erhalten. Der Abgleich beim Import steht in `src/model/dedupe.ts`.
+Weitere E-Mail-Adressen und Telefonnummern einer Quelle, die nicht in die Karte passen,
+liegen in `extra` und zählen beim Abgleich mit.
+
 ### Migration und unterschiedliche Versionen
 
 - Beim Start wird ein älterer Stand automatisch umgestellt (`src/store/migrate.ts`):
   `email` → `emailPrivate`, `phone` → `phoneMobile`, die Hausnummer wird von der Straße
   getrennt, Freigaben und empfangene Karten werden entsprechend umbenannt. Nichts wird gelöscht.
+- Von 2.0 auf 2.1 bekommen früher importierte Einträge einen Datensatz der Quelle „Frühere
+  Importe". Die angezeigten Karten ändern sich dabei nicht. Der Austausch zwischen Geräten
+  ist nicht betroffen, 2.0 und 2.1 vertragen sich.
 - Stammt der gespeicherte Stand von einer **neueren** App-Version oder ist er nicht lesbar,
   verändert die App nichts und zeigt einen Hinweis.
 - Zwei Geräte mit unterschiedlicher Schema-Hauptversion tauschen **keine Kartendaten** aus.
