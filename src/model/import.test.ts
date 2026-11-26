@@ -7,6 +7,7 @@ vi.mock('../store/db', () => ({
 import { AutomergeStore } from '../store/automerge-store';
 import { migrateState, needsMigration } from '../store/migrate';
 import { parseVCards } from '../io/vcard';
+import { fromPickedContacts } from '../io/phonebook';
 import { LEGACY_SOURCE_ID, MANUAL_SOURCE_ID, SCHEMA_VERSION, type Connection, type ImportSource, type SourceRecord } from '../types';
 import { manualOverrides, mergeRecords, mergeRecordsDetailed } from './merge';
 import {
@@ -297,5 +298,35 @@ describe('Import im Speicher', () => {
     expect(Object.values(linked.records ?? {})[0].card).toMatchObject({ emailPrivate: 'clara@example.org', city: 'Konstanz' });
     // Die Karte eines verbundenen Kontakts kommt nur von der Person selbst
     expect(linked.remoteCard).toBeUndefined();
+  });
+});
+
+describe('Auswahl aus dem Telefonbuch', () => {
+  it('ordnet Name, Adressen und Nummern zu und behält weitere Angaben', () => {
+    const [clara, emil, ...rest] = fromPickedContacts([
+      {
+        name: ['Dr. Clara Sommer'],
+        email: ['clara@example.org', 'c.sommer@firma.example', 'dritte@example.org'],
+        tel: ['0160 1', '07531 2', '07531 3'],
+        address: [{ addressLine: ['Seeweg 3'], city: 'Konstanz', postalCode: '78462', country: 'DE' }],
+      },
+      { name: ['Herbst, Emil'], tel: ['0171 999'] },
+      { name: [], email: [], tel: [] },
+      { name: ['   '] },
+    ]);
+    expect(clara.card).toEqual({
+      firstName: 'Dr. Clara', lastName: 'Sommer',
+      emailPrivate: 'clara@example.org', emailWork: 'c.sommer@firma.example',
+      phoneMobile: '0160 1', phoneWork: '07531 2',
+      street: 'Seeweg', houseNumber: '3', city: 'Konstanz', postalCode: '78462', country: 'DE',
+    });
+    expect(clara.extra).toEqual({ emails: ['dritte@example.org'], phones: ['07531 3'] });
+    expect(emil.card).toEqual({ firstName: 'Emil', lastName: 'Herbst', phoneMobile: '0171 999' });
+    expect(rest).toHaveLength(0);
+  });
+
+  it('verkraftet unerwartete Werte', () => {
+    expect(fromPickedContacts(undefined as never)).toEqual([]);
+    expect(fromPickedContacts([{ name: [42 as never], tel: ['0170 1'], address: ['x' as never] }])).toEqual([{ card: { phoneMobile: '0170 1' } }]);
   });
 });
