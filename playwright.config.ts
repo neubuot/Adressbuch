@@ -38,7 +38,10 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `npm run build && PORT=${PORT} node signaling-server/index.js`,
+    // Variablen über env statt in der Befehlszeile, damit es auch unter Windows läuft.
+    // Die Google-Kennung ist ein Platzhalter; die Tests stellen Google nach.
+    command: 'npm run build && node signaling-server/index.js',
+    env: { PORT: String(PORT), VITE_GOOGLE_CLIENT_ID: 'e2e-test.apps.googleusercontent.com' },
     url: `http://localhost:${PORT}/healthz`,
     reuseExistingServer: !process.env.CI,
     timeout: 180000,

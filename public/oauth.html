@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Anmeldung abgeschlossen</title>
+  </head>
+  <body>
+    <p>Die Anmeldung ist abgeschlossen. Dieses Fenster schließt sich von selbst.</p>
+    <script>
+      // Reicht das Ergebnis der Anmeldung an das Adressbuch zurück, das dieses
+      // Fenster geöffnet hat (gleiche Adresse), und entfernt es aus der Adresszeile.
+      (function () {
+        var hash = window.location.hash;
+        try {
+          history.replaceState(null, '', window.location.pathname);
+        } catch (error) {}
+        if (hash) {
+          var message = { type: 'adressbuch-oauth', hash: hash };
+          try {
+            var channel = new BroadcastChannel('adressbuch-oauth');
+            channel.postMessage(message);
+            channel.close();
+          } catch (error) {}
+          try {
+            if (window.opener) window.opener.postMessage(message, window.location.origin);
+          } catch (error) {}
+        }
+        window.setTimeout(function () {
+          window.close();
+        }, 150);
+      })();
+    </script>
+  </body>
+</html>

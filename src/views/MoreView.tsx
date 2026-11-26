@@ -2,7 +2,7 @@
  * Mehr: Sicherung, Import/Export, Tags, Installation, Darstellung
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { Page, Section } from '../ui/Page';
 import { href } from '../router';
@@ -10,7 +10,9 @@ import { getLastBackupAt } from '../io/backup';
 import { formatDate } from '../model/contact';
 import { getTheme, setTheme, type Theme } from '../model/theme';
 import { InstallCard } from '../ui/InstallCard';
-import { APP_VERSION } from '../types';
+import { MANUAL_SOURCE_ID } from '../types';
+import { findDuplicates } from '../model/dedupe';
+import { getVersionInfo, versionLine } from '../version';
 
 export const MoreView: React.FC = () => {
   const { appState } = useAppContext();
@@ -18,6 +20,12 @@ export const MoreView: React.FC = () => {
   const lastBackup = getLastBackupAt();
   const tagCount = Object.keys(appState.tags ?? {}).length;
   const contactCount = Object.keys(appState.connections).length;
+  const duplicateCount = useMemo(
+    () => findDuplicates(appState.connections ?? {}, appState.notDuplicates).length,
+    [appState.connections, appState.notDuplicates]
+  );
+  const sourceCount = Object.values(appState.sources ?? {}).filter((source) => source.id !== MANUAL_SOURCE_ID).length;
+  const version = getVersionInfo();
 
   const chooseTheme = (next: Theme) => {
     setTheme(next);
@@ -47,6 +55,34 @@ export const MoreView: React.FC = () => {
             <span className="row-arrow" aria-hidden="true" />
           </a>
         </li>
+        {sourceCount > 0 && (
+          <li>
+            <a className="row" href={href('mehr', 'quellen')}>
+              <span className="row-main">
+                <span className="row-title">Übernommene Kontakte</span>
+                <span className="row-sub">Woher sie stammen, was bei Abweichungen gilt, zurücknehmen</span>
+              </span>
+              <span className="row-arrow" aria-hidden="true" />
+            </a>
+          </li>
+        )}
+        {(duplicateCount > 0 || sourceCount > 0) && (
+          <li>
+            <a className="row" href={href('mehr', 'doppelt')}>
+              <span className="row-main">
+                <span className="row-title">Doppelte Einträge</span>
+                <span className="row-sub">
+                  {duplicateCount === 0
+                    ? 'Keine gefunden'
+                    : duplicateCount === 1
+                      ? '1 Paar zu prüfen'
+                      : `${duplicateCount} Paare zu prüfen`}
+                </span>
+              </span>
+              <span className="row-arrow" aria-hidden="true" />
+            </a>
+          </li>
+        )}
         <li>
           <a className="row" href={href('mehr', 'export')}>
             <span className="row-main">
@@ -99,8 +135,23 @@ export const MoreView: React.FC = () => {
             Änderungen gehen direkt von Gerät zu Gerät. Dafür müssen beide die App gleichzeitig
             geöffnet haben; sonst wird die Änderung beim nächsten Mal nachgeholt.
           </p>
-          <p className="muted">Version {APP_VERSION}</p>
         </div>
+      </Section>
+
+      <Section title="Über diese App">
+        <dl className="facts">
+          <div className="fact">
+            <dt>Version</dt>
+            <dd data-testid="app-version">{versionLine(version)}</dd>
+          </div>
+          <div className="fact">
+            <dt>Datenformat</dt>
+            <dd>{version.schema}</dd>
+          </div>
+        </dl>
+        <p className="small muted" style={{ marginTop: 'var(--s-2)' }}>
+          Wenn etwas nicht so läuft wie erwartet, nenne bitte diese Version.
+        </p>
       </Section>
     </Page>
   );

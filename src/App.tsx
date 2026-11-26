@@ -16,6 +16,8 @@ import { ExportView } from './views/ExportView';
 import { NewsView } from './views/NewsView';
 import { ImportView } from './views/ImportView';
 import { BackupView } from './views/BackupView';
+import { DuplicatesView } from './views/DuplicatesView';
+import { SourcesView } from './views/SourcesView';
 import { countUnseen, getActivitySeenAt } from './model/activity';
 import { OnboardingView } from './views/OnboardingView';
 import { Page } from './ui/Page';
@@ -70,6 +72,8 @@ function renderView(route: string[]): React.ReactNode {
       if (second === 'export') return <ExportView />;
       if (second === 'import') return <ImportView />;
       if (second === 'sicherung') return <BackupView />;
+      if (second === 'doppelt') return <DuplicatesView />;
+      if (second === 'quellen') return <SourcesView />;
       return <MoreView />;
     default:
       return (

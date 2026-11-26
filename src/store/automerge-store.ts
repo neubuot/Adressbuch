@@ -11,6 +11,7 @@ import {
   MANUAL_SOURCE_ID,
   SCHEMA_VERSION,
   createEmptyCard,
+  pairKey,
   recordKey,
   type ActivityEntry,
   type AddressCard,
@@ -18,6 +19,7 @@ import {
   type Connection,
   type ContactPrivate,
   type ImportSource,
+  type MergedContact,
   type RemoteCard,
   type SourceRecord,
 } from '../types';
@@ -426,6 +428,222 @@ export class AutomergeStore {
         delete connection.records[key];
       }
       recomputeCard(doc, connection);
+    });
+  }
+
+  /**
+   * Führt zwei Einträge zu einem zusammen: Die Datensätze, Notizen und Tags
+   * von `dropId` gehen auf `keepId` über. `dropId` muss ein nicht verbundener
+   * Eintrag sein. Es geht nichts verloren; `splitContact` trennt wieder.
+   */
+  async mergeContacts(keepId: string, dropId: string): Promise<boolean> {
+    const keep = this.doc.connections[keepId];
+    const drop = this.doc.connections[dropId];
+    if (!keep || !drop || keepId === dropId || drop.kind !== 'local') return false;
+    const snapshot = plain(drop);
+
+    await this.change(`Eintrag ${dropId} mit ${keepId} zusammengeführt`, (doc) => {
+      const target = doc.connections[keepId];
+      if (!target) return;
+      const now = new Date().toISOString();
+
+      if (!target.records) {
+        target.records = {};
+        if (target.kind === 'local' && target.remoteCard && Object.keys(target.remoteCard).length > 0) {
+          ensureLegacySource(doc);
+          target.records[recordKey(LEGACY_SOURCE_ID, target.id)] = {
+            sourceId: LEGACY_SOURCE_ID,
+            externalId: target.id,
+            importedAt: target.createdAt || now,
+            card: plain(target.remoteCard),
+          };
+        }
+      }
+
+      const incoming: Record<string, SourceRecord> = snapshot.records ? { ...snapshot.records } : {};
+      if (Object.keys(incoming).length === 0 && snapshot.remoteCard && Object.keys(snapshot.remoteCard).length > 0) {
+        ensureLegacySource(doc);
+        incoming[recordKey(LEGACY_SOURCE_ID, dropId)] = {
+          sourceId: LEGACY_SOURCE_ID,
+          externalId: dropId,
+          importedAt: snapshot.createdAt || now,
+          card: snapshot.remoteCard,
+        };
+      }
+
+      const recordKeys: string[] = [];
+      for (const [key, record] of Object.entries(incoming)) {
+        let target_key = key;
+        for (let n = 2; target.records[target_key]; n++) target_key = `${key}~${n}`;
+        target.records[target_key] = record;
+        recordKeys.push(target_key);
+      }
+
+      if (snapshot.private) {
+        if (!target.private) target.private = {};
+        for (const field of CONTACT_PRIVATE_FIELDS) {
+          const value = snapshot.private[field];
+          if (!value) continue;
+          const own = target.private[field];
+          if (!own) target.private[field] = value;
+          else if (field === 'notes' && own !== value && !own.includes(value)) {
+            target.private[field] = `${own}\n\n${value}`.slice(0, 10000);
+          }
+        }
+      }
+      if (snapshot.tagIds && snapshot.tagIds.length > 0) {
+        if (!target.tagIds) target.tagIds = [];
+        for (const tagId of snapshot.tagIds) {
+          if (!target.tagIds.includes(tagId)) target.tagIds.push(tagId);
+        }
+      }
+      if (snapshot.label && !target.label) target.label = snapshot.label;
+
+      const memo: MergedContact = { id: dropId, at: now, recordKeys };
+      if (snapshot.label) memo.label = snapshot.label;
+      if (snapshot.knownName) memo.knownName = snapshot.knownName;
+      if (snapshot.createdAt) memo.createdAt = snapshot.createdAt;
+      if (snapshot.private) memo.private = snapshot.private;
+      if (snapshot.tagIds && snapshot.tagIds.length > 0) memo.tagIds = snapshot.tagIds;
+      if (!target.merged) target.merged = [];
+      target.merged.push(memo);
+      // Frühere Zusammenführungen des aufgelösten Eintrags bleiben trennbar
+      for (const earlier of snapshot.merged ?? []) target.merged.push(earlier);
+
+      recomputeCard(doc, target);
+      delete doc.connections[dropId];
+    });
+    return true;
+  }
+
+  /**
+   * Trennt einen zuvor zusammengeführten Eintrag wieder ab. Er entsteht als
+   * eigener, nicht verbundener Eintrag mit seinen Datensätzen, Notizen und
+   * Tags neu. Das Paar gilt danach als verschieden und wird nicht erneut
+   * als doppelt gemeldet. Gibt die Kennung des neuen Eintrags zurück.
+   */
+  async splitContact(keepId: string, mergedId: string): Promise<string | null> {
+    const keep = this.doc.connections[keepId];
+    const memo = keep?.merged?.find((entry) => entry.id === mergedId);
+    if (!keep || !memo) return null;
+    const snapshot = plain(memo);
+    const newId = this.doc.connections[snapshot.id] ? `local-${createUuid()}` : snapshot.id;
+
+    await this.change(`Eintrag ${newId} von ${keepId} getrennt`, (doc) => {
+      const source = doc.connections[keepId];
+      if (!source) return;
+
+      const records: Record<string, SourceRecord> = {};
+      for (const key of snapshot.recordKeys) {
+        const record = source.records?.[key];
+        if (!record) continue;
+        records[recordKey(record.sourceId, record.externalId)] = plain(record);
+        delete source.records![key];
+      }
+
+      const restored: Connection = {
+        id: newId,
+        kind: 'local',
+        peerPubKey: '',
+        allowedFields: [],
+        storeRemoteCard: true,
+        status: 'offline',
+        createdAt: snapshot.createdAt || new Date().toISOString(),
+        records,
+      };
+      if (snapshot.label) restored.label = snapshot.label;
+      if (snapshot.knownName) restored.knownName = snapshot.knownName;
+      if (snapshot.private) restored.private = snapshot.private;
+      if (snapshot.tagIds) restored.tagIds = snapshot.tagIds;
+      doc.connections[newId] = restored;
+      recomputeCard(doc, doc.connections[newId]);
+
+      const index = source.merged ? source.merged.findIndex((entry) => entry.id === mergedId) : -1;
+      if (index !== -1) source.merged!.splice(index, 1);
+      recomputeCard(doc, source);
+
+      if (!doc.notDuplicates) doc.notDuplicates = {};
+      doc.notDuplicates[pairKey(keepId, newId)] = true;
+    });
+    return newId;
+  }
+
+  /** Merkt sich, dass zwei Einträge verschiedene Personen sind */
+  async markDistinct(aId: string, bId: string): Promise<void> {
+    await this.change(`Einträge ${aId} und ${bId} sind verschieden`, (doc) => {
+      if (!doc.notDuplicates) doc.notDuplicates = {};
+      doc.notDuplicates[pairKey(aId, bId)] = true;
+    });
+  }
+
+  /**
+   * Was das Zurücknehmen eines Imports bewirken würde: `removed` Einträge
+   * bestehen nur aus dieser Quelle und würden gelöscht, `kept` behalten ihre
+   * übrigen Angaben.
+   */
+  previewUndoImport(sourceId: string): { removed: number; kept: number } {
+    let removed = 0;
+    let kept = 0;
+    for (const connection of Object.values(this.doc.connections)) {
+      const records = Object.values(connection.records ?? {});
+      if (!records.some((record) => record.sourceId === sourceId)) continue;
+      const others = records.filter((record) => record.sourceId !== sourceId && record.sourceId !== MANUAL_SOURCE_ID);
+      if (connection.kind === 'local' && others.length === 0) removed++;
+      else kept++;
+    }
+    return { removed, kept };
+  }
+
+  /**
+   * Nimmt einen Import zurück: Alle Datensätze der Quelle werden entfernt.
+   * Nicht verbundene Einträge, die nur aus dieser Quelle bestanden, werden
+   * samt Notizen gelöscht; alle anderen behalten ihre übrigen Angaben.
+   */
+  async undoImport(sourceId: string): Promise<{ removed: number; kept: number }> {
+    const result = { removed: 0, kept: 0 };
+    if (sourceId === MANUAL_SOURCE_ID) return result;
+
+    await this.change(`Import ${sourceId} zurückgenommen`, (doc) => {
+      for (const id of Object.keys(doc.connections)) {
+        const connection = doc.connections[id];
+        if (!connection.records) continue;
+        const gone = Object.keys(connection.records).filter((key) => connection.records![key].sourceId === sourceId);
+        if (gone.length === 0) continue;
+        for (const key of gone) delete connection.records[key];
+
+        const others = Object.values(connection.records).filter((record) => record.sourceId !== MANUAL_SOURCE_ID);
+        if (connection.kind === 'local' && others.length === 0) {
+          delete doc.connections[id];
+          result.removed++;
+          continue;
+        }
+        if (connection.merged) {
+          for (let i = connection.merged.length - 1; i >= 0; i--) {
+            const memo = connection.merged[i];
+            const left = memo.recordKeys.filter((key) => !gone.includes(key));
+            if (left.length === 0) connection.merged.splice(i, 1);
+            else if (left.length !== memo.recordKeys.length) memo.recordKeys = left;
+          }
+        }
+        recomputeCard(doc, connection);
+        result.kept++;
+      }
+      if (doc.sources?.[sourceId]) delete doc.sources[sourceId];
+    });
+    return result;
+  }
+
+  /** Macht eine Importquelle zur führenden: Ihre Angaben gelten bei Abweichungen */
+  async setLeadingSource(sourceId: string): Promise<void> {
+    if (!this.doc.sources?.[sourceId]) return;
+    await this.change(`Quelle ${sourceId} ist führend`, (doc) => {
+      const source = doc.sources?.[sourceId];
+      if (!source) return;
+      const others = Object.values(doc.sources!)
+        .filter((entry) => entry.id !== sourceId)
+        .map((entry) => entry.rank);
+      source.rank = Math.min(0, ...others) - 1;
+      for (const connection of Object.values(doc.connections)) recomputeCard(doc, connection);
     });
   }
 
