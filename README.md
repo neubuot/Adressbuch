@@ -97,6 +97,11 @@ Unter **Mehr → Vorhandene Kontakte übernehmen** kannst du Kontakte aus dem Te
 verbunden". Wenn du jemanden davon später einlädst, wird aus dem Eintrag eine echte
 Verbindung; deine Notizen und Tags bleiben erhalten.
 
+Auf Android-Handys mit Chrome geht es auch ohne Datei: **Aus dem Telefonbuch wählen**
+öffnet die Kontakte des Geräts, übernommen wird nur, was du dort ankreuzt. Firma und
+Geburtstag liefert das Telefonbuch auf diesem Weg nicht. Auf dem iPhone und am Computer
+bietet der Browser diese Auswahl nicht an; dort bleibt die Datei.
+
 Vor dem Übernehmen zeigt die App, was schon vorhanden ist. Liest du dieselbe Datei noch
 einmal ein, werden die Einträge aktualisiert und nicht verdoppelt. Gehört ein Eintrag sicher
 zu einem vorhandenen Kontakt (gleiche E-Mail-Adresse oder Telefonnummer), werden die Angaben

@@ -18,6 +18,7 @@ import { parseVCards, type ImportedContact } from '../io/vcard';
 import { parseContactsCsv } from '../io/csv';
 import { contactName, displayNameOfCard, todayIso } from '../model/contact';
 import { MATCH_REASON_TEXT, planImport, summarizePlan, type PlanItem } from '../model/dedupe';
+import { PHONEBOOK_SOURCE_ID, PHONEBOOK_SOURCE_NAME, canPickFromPhonebook, pickFromPhonebook } from '../io/phonebook';
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
@@ -25,6 +26,9 @@ export const ImportView: React.FC = () => {
   const { appState, notify } = useAppContext();
   const [contacts, setContacts] = useState<ImportedContact[] | null>(null);
   const [fileName, setFileName] = useState('');
+  /** true, wenn die Kontakte aus dem Telefonbuch des Geräts gewählt wurden */
+  const [fromPhone, setFromPhone] = useState(false);
+  const phonebook = useMemo(() => canPickFromPhonebook(), []);
   const [unknown, setUnknown] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [tagId, setTagId] = useState('');
@@ -35,7 +39,8 @@ export const ImportView: React.FC = () => {
   const [separate, setSeparate] = useState<Set<number>>(new Set());
   const [leading, setLeading] = useState<'new' | 'old'>('old');
 
-  const sourceId = `file:${fileName.trim().toLowerCase()}`;
+  const sourceId = fromPhone ? PHONEBOOK_SOURCE_ID : `file:${fileName.trim().toLowerCase()}`;
+  const sourceName = fromPhone ? PHONEBOOK_SOURCE_NAME : fileName;
   const plan = useMemo<PlanItem[]>(
     () => (contacts ? planImport(appState.connections ?? {}, sourceId, contacts) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -68,14 +73,31 @@ export const ImportView: React.FC = () => {
 
   const tags = Object.values(appState.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name, 'de'));
 
-  const readFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  const reset = () => {
     setContacts(null);
     setUnknown([]);
     setError('');
     setJoined(new Set());
     setSeparate(new Set());
     setLeading('old');
+  };
+
+  const pickPhone = async () => {
+    reset();
+    try {
+      const result = await pickFromPhonebook();
+      if (result.length === 0) return;
+      setFromPhone(true);
+      setContacts(result);
+    } catch {
+      setError('Das Telefonbuch konnte nicht geöffnet werden. Nimm stattdessen eine Kontaktdatei (.vcf).');
+    }
+  };
+
+  const readFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    reset();
+    setFromPhone(false);
     if (!file) return;
     setFileName(file.name);
 
@@ -109,9 +131,9 @@ export const ImportView: React.FC = () => {
   const run = async () => {
     if (!contacts) return;
     setBusy(true);
-    const origin = `Import aus ${fileName} am ${todayIso().split('-').reverse().join('.')}`;
+    const origin = `Import aus ${fromPhone ? 'dem Telefonbuch' : fileName} am ${todayIso().split('-').reverse().join('.')}`;
     const result = await store.applyImport(
-      { id: sourceId, kind: 'file', name: fileName },
+      { id: sourceId, kind: fromPhone ? 'phone' : 'file', name: sourceName },
       plan.map((item) => ({
         index: item.index,
         contact: item.contact,
@@ -144,6 +166,18 @@ export const ImportView: React.FC = () => {
       back={{ href: href('mehr'), label: 'Mehr' }}
     >
       <div className="stack">
+        {phonebook && (
+          <div className="field">
+            <button type="button" className="btn btn-primary" onClick={pickPhone}>
+              Aus dem Telefonbuch wählen
+            </button>
+            <span className="field-hint">
+              Dein Gerät zeigt seine Kontakte. Übernommen wird nur, was du dort ankreuzt. Firma und Geburtstag
+              liefert das Telefonbuch auf diesem Weg nicht; dafür eignet sich eine Kontaktdatei.
+            </span>
+          </div>
+        )}
+
         <div className="field">
           <label className="field-label" htmlFor="import-file">
             Datei auswählen
@@ -221,7 +255,9 @@ export const ImportView: React.FC = () => {
               <p className="small">
                 {[
                   summary.fresh > 0 ? `${summary.fresh} neu` : '',
-                  summary.updates > 0 ? `${summary.updates} aus dieser Datei schon übernommen, werden aktualisiert` : '',
+                  summary.updates > 0
+                    ? `${summary.updates} ${fromPhone ? 'aus dem Telefonbuch' : 'aus dieser Datei'} schon übernommen, werden aktualisiert`
+                    : '',
                   summary.merges > 0 ? `${summary.merges} gehören zu vorhandenen Kontakten` : '',
                   summary.maybes > 0 ? `${summary.maybes} könnten zu vorhandenen Kontakten gehören` : '',
                 ]
@@ -268,7 +304,7 @@ export const ImportView: React.FC = () => {
                 </label>
                 <label className="small" style={{ display: 'block' }}>
                   <input type="radio" name="import-leading" checked={leading === 'new'} onChange={() => setLeading('new')} />{' '}
-                  was in dieser Datei steht
+                  {fromPhone ? 'was im Telefonbuch steht' : 'was in dieser Datei steht'}
                 </label>
                 <span className="field-hint">
                   Was du selbst von Hand geändert hast, bleibt in jedem Fall. Bei verbundenen Kontakten gilt immer deren

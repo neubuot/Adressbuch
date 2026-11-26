@@ -386,3 +386,42 @@ test('Dieselbe Datei zweimal einlesen verdoppelt nichts; eine zweite Datei ergä
   await expect(page.getByText('Lindau')).toBeVisible();
   await expect(page.getByText('0160 7654321')).toBeVisible();
 });
+
+test('Kontakte aus dem Telefonbuch des Geräts wählen; erneutes Wählen verdoppelt nichts', async ({ page }) => {
+  // Ohne Kontaktauswahl im Browser gibt es den Knopf nicht
+  await page.goto('/');
+  await onboard(page, 'Max', 'Mustermann');
+  await page.goto('/#/mehr/import');
+  await expect(page.getByLabel('Datei auswählen')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Aus dem Telefonbuch wählen' })).toBeHidden();
+
+  // Kontaktauswahl des Geräts nachstellen (gibt es sonst nur in Chrome auf Android)
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'contacts', {
+      configurable: true,
+      value: {
+        getProperties: async () => ['name', 'email', 'tel', 'address'],
+        select: async () => [
+          { name: ['Clara Sommer'], email: ['clara@example.org'], tel: ['0160 1234567'], address: [{ addressLine: ['Seeweg 3'], city: 'Konstanz', postalCode: '78462' }] },
+          { name: ['Emil Herbst'], tel: ['0171 999000'] },
+        ],
+      },
+    });
+  });
+  await page.reload();
+
+  await page.getByRole('button', { name: 'Aus dem Telefonbuch wählen' }).click();
+  await expect(page.getByRole('heading', { name: '2 Kontakte gefunden' })).toBeVisible();
+  await page.getByRole('button', { name: '2 Kontakte übernehmen' }).click();
+  await expect(page.getByText('2 Kontakte', { exact: true })).toBeVisible();
+
+  await page.goto('/#/mehr/import');
+  await page.getByRole('button', { name: 'Aus dem Telefonbuch wählen' }).click();
+  await expect(page.getByText('2 aus dem Telefonbuch schon übernommen, werden aktualisiert')).toBeVisible();
+  await page.getByRole('button', { name: '2 Kontakte übernehmen' }).click();
+  await expect(page.getByText('2 Kontakte', { exact: true })).toBeVisible();
+
+  await page.getByRole('link', { name: /Clara Sommer/ }).click();
+  await expect(page.getByText('Konstanz')).toBeVisible();
+  await expect(page.getByText('0160 1234567')).toBeVisible();
+});
