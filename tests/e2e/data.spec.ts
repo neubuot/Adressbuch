@@ -5,6 +5,8 @@
 import { test, expect, type Page } from '@playwright/test';
 import * as Automerge from '@automerge/automerge';
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { deflateRawSync } from 'node:zlib';
 import { openApp, onboard, fillCard, connect, sectionByTitle, CONNECT_TIMEOUT } from './helpers';
 
 /** Stand, wie ihn die App vor der Erweiterung der Felder gespeichert hat */
@@ -526,4 +528,179 @@ test('Kontakte aus Google Kontakte holen (Google wird nachgestellt)', async ({ p
   await page.goto('/#/mehr/import');
   await page.getByRole('button', { name: 'Aus Google Kontakte holen' }).click();
   await expect(page.getByText('2 aus Google Kontakte schon übernommen, werden aktualisiert')).toBeVisible();
+});
+
+/** Baut ein kleines ZIP-Archiv mit einer Datei, wie es LinkedIn verschickt */
+function zipWith(name: string, text: string): Buffer {
+  const fileName = Buffer.from(name, 'utf8');
+  const data = Buffer.from(text, 'utf8');
+  const body = deflateRawSync(data);
+
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(20, 4);
+  local.writeUInt16LE(0x0800, 6);
+  local.writeUInt16LE(8, 8);
+  local.writeUInt32LE(body.length, 18);
+  local.writeUInt32LE(data.length, 22);
+  local.writeUInt16LE(fileName.length, 26);
+
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(0x0800, 8);
+  central.writeUInt16LE(8, 10);
+  central.writeUInt32LE(body.length, 20);
+  central.writeUInt32LE(data.length, 24);
+  central.writeUInt16LE(fileName.length, 28);
+
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(1, 8);
+  end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(46 + fileName.length, 12);
+  end.writeUInt32LE(30 + fileName.length + body.length, 16);
+
+  return Buffer.concat([local, fileName, body, central, fileName, end]);
+}
+
+const LINKEDIN_CSV = [
+  'Notes:',
+  '"When exporting your connection data, you may notice that some of the email addresses are missing."',
+  '',
+  'First Name,Last Name,URL,Email Address,Company,Position,Connected On',
+  'Clara,Sommer,https://www.linkedin.com/in/clara-sommer,clara@example.org,Eis AG,Leitung,12 Mar 2024',
+  'Emil,Herbst,https://www.linkedin.com/in/emil-herbst,,Laub GmbH,Gärtner,03 Jan 2023',
+].join('\n');
+
+test('Datenexport von LinkedIn: Archiv auf die Seite ziehen; die Tabelle allein aktualisiert', async ({ page }) => {
+  await page.goto('/');
+  await onboard(page, 'Max', 'Mustermann');
+  await page.goto('/#/mehr/import');
+  await expect(page.getByLabel('Datei auswählen')).toBeVisible();
+
+  // Das Archiv wird auf die Seite gezogen und losgelassen
+  const zip = zipWith('Basic_LinkedInDataExport/Connections.csv', LINKEDIN_CSV);
+  await page.evaluate((bytes) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array(bytes)], 'Basic_LinkedInDataExport.zip', { type: 'application/zip' }));
+    window.dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+  }, Array.from(zip));
+
+  await expect(page.getByRole('heading', { name: '2 Kontakte gefunden' })).toBeVisible();
+  await page.getByRole('button', { name: '2 Kontakte übernehmen' }).click();
+  await expect(page.getByText('2 Kontakte', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: /Clara Sommer/ }).click();
+  await expect(page.getByText('Eis AG')).toBeVisible();
+
+  await page.goto('/#/mehr/quellen');
+  await expect(page.getByText('LinkedIn', { exact: true })).toBeVisible();
+
+  // Dieselben Kontakte als einzelne Tabelle: nichts verdoppelt sich
+  await page.goto('/#/mehr/import');
+  await page.getByLabel('Datei auswählen').setInputFiles({
+    name: 'Connections.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(LINKEDIN_CSV, 'utf8'),
+  });
+  await expect(page.getByText('2 aus LinkedIn schon übernommen, werden aktualisiert')).toBeVisible();
+
+  // Ein Archiv ohne Kontakttabelle wird verständlich abgewiesen
+  await page.getByLabel('Datei auswählen').setInputFiles({
+    name: 'anderes.zip',
+    mimeType: 'application/zip',
+    buffer: zipWith('Profile.csv', 'x'),
+  });
+  await expect(page.getByRole('alert')).toContainText('keine Kontakttabelle von LinkedIn');
+});
+
+test('Kontakte aus einem Microsoft-Konto holen (Microsoft wird nachgestellt)', async ({ page, context }) => {
+  let challenge = '';
+  let tokenCalls = 0;
+  await context.route('https://login.microsoftonline.com/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname.endsWith('/authorize')) {
+      // Anmeldung: leitet wie Microsoft mit einem Einmalcode zurück auf oauth.html
+      expect(url.pathname).toBe('/common/oauth2/v2.0/authorize');
+      expect(url.searchParams.get('response_type')).toBe('code');
+      expect(url.searchParams.get('response_mode')).toBe('fragment');
+      expect(url.searchParams.get('scope')).toBe('https://graph.microsoft.com/Contacts.Read');
+      expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+      challenge = url.searchParams.get('code_challenge') ?? '';
+      const redirect = url.searchParams.get('redirect_uri')!;
+      expect(redirect).toMatch(/\/oauth\.html$/);
+      await route.fulfill({
+        status: 302,
+        headers: { location: `${redirect}#code=einmal-code&state=${url.searchParams.get('state')}` },
+      });
+      return;
+    }
+    // Tausch des Einmalcodes gegen den Zugang; der Geheimwert muss zur Prüfsumme passen
+    expect(request.method()).toBe('POST');
+    const body = new URLSearchParams(request.postData() ?? '');
+    expect(body.get('grant_type')).toBe('authorization_code');
+    expect(body.get('code')).toBe('einmal-code');
+    expect(body.has('client_secret')).toBe(false);
+    expect(createHash('sha256').update(body.get('code_verifier') ?? '').digest('base64url')).toBe(challenge);
+    tokenCalls++;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify({ token_type: 'Bearer', access_token: 'ms-zugang', expires_in: 3600 }),
+    });
+  });
+
+  let calls = 0;
+  await context.route('https://graph.microsoft.com/**', async (route) => {
+    expect(route.request().headers()['authorization']).toBe('Bearer ms-zugang');
+    const url = new URL(route.request().url());
+    calls++;
+    const first = !url.searchParams.get('$skip');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' },
+      body: JSON.stringify(
+        first
+          ? {
+              value: [{ id: 'm1', givenName: 'Clara', surname: 'Sommer', emailAddresses: [{ address: 'clara@example.org' }], companyName: 'Eis AG' }],
+              '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/contacts?$top=100&$skip=100',
+            }
+          : {
+              value: [{ id: 'm2', givenName: 'Emil', surname: 'Herbst', mobilePhone: '0171 999000' }],
+              // Eine fremde Adresse für die nächste Seite darf nicht aufgerufen werden
+              '@odata.nextLink': 'https://example.org/boese',
+            }
+      ),
+    });
+  });
+  let foreign = 0;
+  await context.route('https://example.org/**', async (route) => {
+    foreign++;
+    await route.abort();
+  });
+
+  await page.goto('/');
+  await onboard(page, 'Max', 'Mustermann');
+  await page.goto('/#/mehr/import');
+  await page.getByRole('button', { name: 'Aus Microsoft-Konto holen' }).click();
+  await expect(page.getByRole('heading', { name: '2 Kontakte gefunden' })).toBeVisible();
+  expect(tokenCalls).toBe(1);
+  expect(calls).toBe(2);
+  expect(foreign).toBe(0);
+  await page.getByRole('button', { name: '2 Kontakte übernehmen' }).click();
+  await expect(page.getByText('2 Kontakte', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: /Clara Sommer/ }).click();
+  await expect(page.getByText('Eis AG')).toBeVisible();
+
+  // Der Zugang wird nirgends gespeichert
+  const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }));
+  expect(stored).not.toContain('ms-zugang');
+  expect(stored).not.toContain('einmal-code');
+
+  // Erneutes Holen aktualisiert
+  await page.goto('/#/mehr/import');
+  await page.getByRole('button', { name: 'Aus Microsoft-Konto holen' }).click();
+  await expect(page.getByText('2 aus dem Microsoft-Konto schon übernommen, werden aktualisiert')).toBeVisible();
 });

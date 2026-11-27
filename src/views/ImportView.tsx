@@ -1,5 +1,7 @@
 /**
- * Vorhandene Kontakte aus vCard oder CSV übernehmen.
+ * Vorhandene Kontakte übernehmen: aus einer Datei (vCard, CSV, Datenexport
+ * von LinkedIn), aus dem Telefonbuch des Geräts oder direkt aus einem
+ * Google- oder Microsoft-Konto.
  * Sie werden als nicht verbundene Einträge angelegt und lassen sich später
  * per Einladung in echte Verbindungen umwandeln.
  *
@@ -14,22 +16,44 @@ import { useAppContext } from '../context/AppContext';
 import { store } from '../store/automerge-store';
 import { Page, Section } from '../ui/Page';
 import { href, navigate } from '../router';
-import { parseVCards, type ImportedContact } from '../io/vcard';
-import { parseContactsCsv } from '../io/csv';
+import type { ImportedContact } from '../io/vcard';
+import { ImportFileError, readContactsFiles } from '../io/import-file';
+import { LINKEDIN_SOURCE_ID, LINKEDIN_SOURCE_NAME } from '../io/linkedin';
+import { MICROSOFT_SOURCE_ID, MICROSOFT_SOURCE_NAME, canImportFromMicrosoft, importFromMicrosoft } from '../io/microsoft';
+import { ImportAccessError } from '../io/oauth-popup';
+import { takeSharedFiles } from '../io/shared';
 import { contactName, displayNameOfCard, todayIso } from '../model/contact';
 import { MATCH_REASON_TEXT, planImport, summarizePlan, type PlanItem } from '../model/dedupe';
 import { PHONEBOOK_SOURCE_ID, PHONEBOOK_SOURCE_NAME, canPickFromPhonebook, pickFromPhonebook } from '../io/phonebook';
-import { GOOGLE_SOURCE_ID, GOOGLE_SOURCE_NAME, GoogleImportError, canImportFromGoogle, importFromGoogle } from '../io/google';
+import { GOOGLE_SOURCE_ID, GOOGLE_SOURCE_NAME, canImportFromGoogle, importFromGoogle } from '../io/google';
 
-type Origin = 'file' | 'phone' | 'google';
+type Origin = 'file' | 'phone' | 'google' | 'linkedin' | 'microsoft';
+type Online = 'google' | 'microsoft';
 
 const ORIGIN_TEXT: Record<Origin, { already: string; leading: string; origin: string }> = {
   file: { already: 'aus dieser Datei', leading: 'was in dieser Datei steht', origin: '' },
   phone: { already: 'aus dem Telefonbuch', leading: 'was im Telefonbuch steht', origin: 'dem Telefonbuch' },
   google: { already: 'aus Google Kontakte', leading: 'was in Google Kontakte steht', origin: 'Google Kontakte' },
+  linkedin: { already: 'aus LinkedIn', leading: 'was bei LinkedIn steht', origin: 'LinkedIn' },
+  microsoft: { already: 'aus dem Microsoft-Konto', leading: 'was im Microsoft-Konto steht', origin: 'dem Microsoft-Konto' },
 };
 
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
+/** Feste Quellen; Dateien bekommen ihre Quelle aus dem Dateinamen */
+const FIXED_SOURCE: Partial<Record<Origin, { id: string; name: string }>> = {
+  phone: { id: PHONEBOOK_SOURCE_ID, name: PHONEBOOK_SOURCE_NAME },
+  google: { id: GOOGLE_SOURCE_ID, name: GOOGLE_SOURCE_NAME },
+  linkedin: { id: LINKEDIN_SOURCE_ID, name: LINKEDIN_SOURCE_NAME },
+  microsoft: { id: MICROSOFT_SOURCE_ID, name: MICROSOFT_SOURCE_NAME },
+};
+
+const ONLINE: Record<Online, { name: string; run: (signal: AbortSignal) => Promise<ImportedContact[]>; empty: string }> = {
+  google: { name: 'Google', run: importFromGoogle, empty: 'In diesem Google-Konto wurden keine Kontakte gefunden.' },
+  microsoft: {
+    name: 'Microsoft',
+    run: importFromMicrosoft,
+    empty: 'In diesem Microsoft-Konto wurden keine Kontakte gefunden.',
+  },
+};
 
 export const ImportView: React.FC = () => {
   const { appState, notify } = useAppContext();
@@ -39,8 +63,11 @@ export const ImportView: React.FC = () => {
   const [origin, setOrigin] = useState<Origin>('file');
   const phonebook = useMemo(() => canPickFromPhonebook(), []);
   const google = useMemo(() => canImportFromGoogle(), []);
-  /** Läuft gerade eine Anmeldung bei Google? Dann lässt sie sich hierüber abbrechen. */
-  const [waiting, setWaiting] = useState(false);
+  const microsoft = useMemo(() => canImportFromMicrosoft(), []);
+  /** Läuft gerade eine Anmeldung bei einem Dienst? Dann lässt sie sich hierüber abbrechen. */
+  const [waiting, setWaiting] = useState<Online | null>(null);
+  /** Wird gerade eine Datei über die Seite gezogen? */
+  const [dragging, setDragging] = useState(false);
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
   const [unknown, setUnknown] = useState<string[]>([]);
@@ -53,9 +80,8 @@ export const ImportView: React.FC = () => {
   const [separate, setSeparate] = useState<Set<number>>(new Set());
   const [leading, setLeading] = useState<'new' | 'old'>('old');
 
-  const sourceId =
-    origin === 'phone' ? PHONEBOOK_SOURCE_ID : origin === 'google' ? GOOGLE_SOURCE_ID : `file:${fileName.trim().toLowerCase()}`;
-  const sourceName = origin === 'phone' ? PHONEBOOK_SOURCE_NAME : origin === 'google' ? GOOGLE_SOURCE_NAME : fileName;
+  const sourceId = FIXED_SOURCE[origin]?.id ?? `file:${fileName.trim().toLowerCase()}`;
+  const sourceName = FIXED_SOURCE[origin]?.name ?? fileName;
   const plan = useMemo<PlanItem[]>(
     () => (contacts ? planImport(appState.connections ?? {}, sourceId, contacts) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -109,72 +135,103 @@ export const ImportView: React.FC = () => {
     }
   };
 
-  const pickGoogle = async () => {
+  const pickOnline = async (service: Online) => {
     reset();
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
-    setWaiting(true);
+    setWaiting(service);
+    const { name, run: fetchContacts, empty } = ONLINE[service];
     try {
       // Das Anmeldefenster öffnet sich sofort, noch im selben Klick
-      const result = await importFromGoogle(controller.signal);
+      const result = await fetchContacts(controller.signal);
       if (result.length === 0) {
-        setError('In diesem Google-Konto wurden keine Kontakte gefunden.');
+        setError(empty);
         return;
       }
-      setOrigin('google');
+      setOrigin(service);
       setContacts(result);
     } catch (problem) {
-      const kind = problem instanceof GoogleImportError ? problem.kind : 'network';
+      const kind = problem instanceof ImportAccessError ? problem.kind : 'network';
       if (kind === 'cancelled') return;
       setError(
         kind === 'blocked'
           ? 'Dein Browser hat das Anmeldefenster unterdrückt. Erlaube für diese Seite neue Fenster und versuche es noch einmal.'
           : kind === 'denied'
-            ? 'Google hat den Zugriff auf deine Kontakte nicht erlaubt. Es wurde nichts übernommen.'
-            : 'Die Kontakte konnten nicht von Google geholt werden. Versuche es später noch einmal.'
+            ? `${name} hat den Zugriff auf deine Kontakte nicht erlaubt. Es wurde nichts übernommen.`
+            : `Die Kontakte konnten nicht von ${name} geholt werden. Versuche es später noch einmal.`
       );
     } finally {
       if (abort.current === controller) {
         abort.current = null;
-        setWaiting(false);
+        setWaiting(null);
       }
     }
   };
 
-  const readFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  /** Liest gewählte, abgelegte oder geteilte Dateien */
+  const loadFiles = async (files: File[]) => {
     reset();
     setOrigin('file');
-    if (!file) return;
-    setFileName(file.name);
-
-    if (file.size > MAX_FILE_BYTES) {
-      setError('Die Datei ist zu groß (über 10 MB). Teile sie in kleinere Dateien auf.');
-      return;
-    }
-
+    if (files.length === 0) return;
+    setFileName(files.length === 1 ? files[0].name : `${files[0].name} und ${files.length - 1} weitere`);
     try {
-      const text = await file.text();
-      let result: ImportedContact[];
-      if (/BEGIN:VCARD/i.test(text)) {
-        result = parseVCards(text);
-      } else {
-        const parsed = parseContactsCsv(text);
-        result = parsed.contacts;
-        setUnknown(parsed.unknownHeaders);
-      }
-      if (result.length === 0) {
-        setError(
-          'In dieser Datei wurden keine Kontakte gefunden. Unterstützt werden Kontaktdateien (.vcf) und Tabellen (.csv) mit einer Überschriftenzeile wie „Vorname; Nachname; E-Mail“.'
-        );
-        return;
-      }
-      setContacts(result);
-    } catch {
-      setError('Die Datei konnte nicht gelesen werden. Ist es eine .vcf- oder .csv-Datei?');
+      const result = await readContactsFiles(files);
+      setOrigin(result.origin);
+      setUnknown(result.unknownHeaders);
+      setContacts(result.contacts);
+    } catch (problem) {
+      setError(
+        problem instanceof ImportFileError
+          ? problem.message
+          : 'Die Datei konnte nicht gelesen werden. Ist es eine .vcf- oder .csv-Datei?'
+      );
     }
   };
+  const loadFilesRef = useRef(loadFiles);
+  loadFilesRef.current = loadFiles;
+
+  const readFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+    void loadFiles(Array.from(event.target.files ?? []));
+  };
+
+  // Dateien, die eine andere App über „Teilen“ übergeben hat
+  useEffect(() => {
+    let active = true;
+    void takeSharedFiles().then((files) => {
+      if (active && files.length > 0) void loadFilesRef.current(files);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Dateien lassen sich an beliebiger Stelle auf die Seite ziehen
+  useEffect(() => {
+    const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files');
+    const onOver = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      setDragging(true);
+    };
+    const onLeave = (event: DragEvent) => {
+      if (!event.relatedTarget) setDragging(false);
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      setDragging(false);
+      void loadFilesRef.current(Array.from(event.dataTransfer?.files ?? []));
+    };
+    window.addEventListener('dragover', onOver);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onOver);
+      window.removeEventListener('dragleave', onLeave);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, []);
 
   const run = async () => {
     if (!contacts) return;
@@ -210,7 +267,7 @@ export const ImportView: React.FC = () => {
   return (
     <Page
       title="Kontakte übernehmen"
-      lead="Übernimm Kontakte aus deinem Telefonbuch oder einer Tabelle. Sie bleiben zunächst so, wie sie sind; wen du einlädst, dessen Eintrag hält sich danach von selbst aktuell."
+      lead="Übernimm Kontakte aus deinem Telefonbuch, einer Datei oder einem anderen Dienst. Sie bleiben zunächst so, wie sie sind; wen du einlädst, dessen Eintrag hält sich danach von selbst aktuell."
       back={{ href: href('mehr'), label: 'Mehr' }}
     >
       <div className="stack">
@@ -226,31 +283,39 @@ export const ImportView: React.FC = () => {
           </div>
         )}
 
-        {google && (
-          <div className="field">
-            {waiting ? (
-              <>
-                <p className="small" role="status">
-                  Warte auf deine Anmeldung bei Google im anderen Fenster …
-                </p>
-                <button type="button" className="btn" onClick={() => abort.current?.abort()}>
-                  Abbrechen
+        {(['google', 'microsoft'] as const)
+          .filter((service) => (service === 'google' ? google : microsoft))
+          .map((service) => (
+            <div className="field" key={service}>
+              {waiting === service ? (
+                <>
+                  <p className="small" role="status">
+                    Warte auf deine Anmeldung bei {ONLINE[service].name} im anderen Fenster …
+                  </p>
+                  <button type="button" className="btn" onClick={() => abort.current?.abort()}>
+                    Abbrechen
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="btn" onClick={() => pickOnline(service)} disabled={waiting !== null}>
+                  {service === 'google' ? 'Aus Google Kontakte holen' : 'Aus Microsoft-Konto holen'}
                 </button>
-              </>
-            ) : (
-              <button type="button" className="btn" onClick={pickGoogle}>
-                Aus Google Kontakte holen
-              </button>
-            )}
-            <span className="field-hint">
-              Du meldest dich in einem eigenen Fenster bei Google an und erlaubst das Lesen deiner Kontakte. Dein
-              Browser holt sie direkt bei Google; sie laufen über keinen anderen Server. Der Zugang wird nicht
-              gespeichert.
-            </span>
-          </div>
-        )}
+              )}
+              <span className="field-hint">
+                {service === 'google'
+                  ? 'Du meldest dich in einem eigenen Fenster bei Google an und erlaubst das Lesen deiner Kontakte.'
+                  : 'Du meldest dich in einem eigenen Fenster bei Microsoft an (Outlook, Microsoft 365) und erlaubst das Lesen deiner Kontakte.'}{' '}
+                Dein Browser holt sie direkt bei {ONLINE[service].name}; sie laufen über keinen anderen Server. Der Zugang
+                wird nicht gespeichert.
+              </span>
+            </div>
+          ))}
 
-        <div className="field">
+        <div
+          className="field"
+          data-testid="import-drop"
+          style={dragging ? { outline: '2px dashed currentColor', outlineOffset: '6px' } : undefined}
+        >
           <label className="field-label" htmlFor="import-file">
             Datei auswählen
           </label>
@@ -258,11 +323,14 @@ export const ImportView: React.FC = () => {
             className="input"
             id="import-file"
             type="file"
-            accept=".vcf,.vcard,.csv,text/vcard,text/x-vcard,text/csv"
+            multiple
+            accept=".vcf,.vcard,.csv,.zip,text/vcard,text/x-vcard,text/csv,application/zip"
             onChange={readFile}
           />
           <span className="field-hint">
-            Kontaktdatei (.vcf) oder Tabelle (.csv). Die Datei wird nur auf diesem Gerät gelesen.
+            {dragging
+              ? 'Datei hier loslassen.'
+              : 'Kontaktdatei (.vcf), Tabelle (.csv) oder der Datenexport von LinkedIn (.zip). Du kannst die Datei auch auf diese Seite ziehen. Sie wird nur auf diesem Gerät gelesen.'}
           </span>
         </div>
 
@@ -287,6 +355,17 @@ export const ImportView: React.FC = () => {
           <p>
             <strong>Google, Outlook, Apple am Computer:</strong> In der Kontaktverwaltung „Exportieren“
             wählen und als vCard oder CSV speichern.
+          </p>
+          <p>
+            <strong>LinkedIn:</strong> Unter „Einstellungen &amp; Datenschutz“ im Bereich „Datenschutz“ den Punkt
+            „Kopie Ihrer Daten anfordern“ öffnen, „Kontakte“ ankreuzen und das Archiv anfordern. LinkedIn schickt
+            dir einen Link zum Herunterladen. Das Archiv (.zip) kannst du hier unverändert auswählen oder auf diese
+            Seite ziehen. E-Mail-Adressen stehen nur bei Kontakten drin, die das bei LinkedIn erlauben;
+            Telefonnummern fehlen.
+          </p>
+          <p>
+            <strong>Aus einer anderen App teilen (Android):</strong> Ist das Adressbuch als App installiert, erscheint
+            es beim „Teilen“ einer Kontaktdatei in der Auswahl, etwa in der App „Kontakte“ unter „Teilen“.
           </p>
         </div>
       </details>

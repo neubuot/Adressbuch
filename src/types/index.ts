@@ -8,7 +8,7 @@
  * wird nichts übertragen, damit kein Gerät Daten des anderen beschädigt.
  */
 export const SCHEMA_VERSION = '2.1.0';
-export const APP_VERSION = '0.3.0';
+export const APP_VERSION = '0.4.0';
 
 export function schemaMajor(version: string | undefined): number {
   const major = parseInt((version || '1').split('.')[0], 10);
@@ -130,7 +130,7 @@ export type ContactPrivateField = (typeof CONTACT_PRIVATE_FIELDS)[number];
  * abweichenden Angaben gilt (kleiner gewinnt). Eigene Eingaben von Hand
  * gehen immer vor.
  */
-export type ImportSourceKind = 'manual' | 'legacy' | 'file' | 'phone' | 'google' | 'linkedin';
+export type ImportSourceKind = 'manual' | 'legacy' | 'file' | 'phone' | 'google' | 'linkedin' | 'microsoft';
 
 export interface ImportSource {
   id: string;
