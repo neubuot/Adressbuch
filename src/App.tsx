@@ -18,6 +18,7 @@ import { ImportView } from './views/ImportView';
 import { BackupView } from './views/BackupView';
 import { DuplicatesView } from './views/DuplicatesView';
 import { SourcesView } from './views/SourcesView';
+import { NetCheckView } from './views/NetCheckView';
 import { countUnseen, getActivitySeenAt } from './model/activity';
 import { OnboardingView } from './views/OnboardingView';
 import { Page } from './ui/Page';
@@ -74,6 +75,7 @@ function renderView(route: string[]): React.ReactNode {
       if (second === 'sicherung') return <BackupView />;
       if (second === 'doppelt') return <DuplicatesView />;
       if (second === 'quellen') return <SourcesView />;
+      if (second === 'verbindung') return <NetCheckView />;
       return <MoreView />;
     default:
       return (
