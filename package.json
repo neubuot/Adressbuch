@@ -14,7 +14,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
-    "@automerge/automerge": "^2.2.8",
+    "@automerge/automerge": "^3.5.0",
     "buffer": "^6.0.3",
     "dexie": "^4.0.11",
     "jsqr": "^1.4.0",
