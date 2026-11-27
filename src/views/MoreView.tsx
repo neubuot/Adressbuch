@@ -103,6 +103,15 @@ export const MoreView: React.FC = () => {
             <span className="row-arrow" aria-hidden="true" />
           </a>
         </li>
+        <li>
+          <a className="row" href={href('mehr', 'verbindung')}>
+            <span className="row-main">
+              <span className="row-title">Verbindung prüfen</span>
+              <span className="row-sub">Wenn sich ein Kontakt nicht verbinden lässt</span>
+            </span>
+            <span className="row-arrow" aria-hidden="true" />
+          </a>
+        </li>
       </ul>
 
       <InstallCard />

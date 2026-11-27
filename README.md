@@ -131,6 +131,14 @@ geht nichts verloren; beim Kontakt steht **Wieder trennen**. Unter **Mehr → Ü
 Kontakte** siehst du, woher deine Kontakte stammen, legst fest, welche Quelle bei Abweichungen
 gilt, und kannst einen Import als Ganzes zurücknehmen.
 
+### Ein Kontakt lässt sich nicht verbinden
+
+Unter **Mehr → Verbindung prüfen** siehst du, ob das Netz, in dem du gerade bist, direkte
+Verbindungen zulässt. Im Mobilfunk und in Firmennetzen ist das oft nicht der Fall. Die Prüfung
+dauert einige Sekunden, baut keine Verbindung zu einem Kontakt auf und zeigt keine Adressen.
+Meldet sie ein schwieriges oder gesperrtes Netz, hilft ein anderes Netz (zum Beispiel das WLAN
+zu Hause) oder ein vom Betreiber eingerichteter Umweg (TURN-Server, siehe `VITE_ICE_SERVERS`).
+
 ### Welche Version habe ich?
 
 Unter **Mehr → Über diese App** stehen die Version, der Stand und das Datum, z. B.

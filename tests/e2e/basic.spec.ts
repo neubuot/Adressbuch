@@ -80,7 +80,7 @@ test('Die Oberfläche verwendet keine Fachbegriffe', async ({ page }) => {
   await page.goto('/');
   await onboard(page, 'Max', 'Mustermann');
 
-  for (const path of ['/#/', '/#/verbinden', '/#/karte', '/#/aktuelles', '/#/mehr', '/#/mehr/sicherung', '/#/mehr/export', '/#/mehr/import', '/#/mehr/tags', '/#/mehr/doppelt', '/#/mehr/quellen']) {
+  for (const path of ['/#/', '/#/verbinden', '/#/karte', '/#/aktuelles', '/#/mehr', '/#/mehr/sicherung', '/#/mehr/export', '/#/mehr/import', '/#/mehr/tags', '/#/mehr/doppelt', '/#/mehr/quellen', '/#/mehr/verbindung']) {
     await page.goto(path);
     await expect(page.locator('h2').first()).toBeVisible();
     const text = (await page.locator('body').innerText()).replace(/P2P Adressbuch/g, '');
