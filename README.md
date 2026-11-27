@@ -104,7 +104,19 @@ bietet der Browser diese Auswahl nicht an; dort bleibt die Datei.
 
 Hat der Betreiber es eingerichtet, gibt es außerdem **Aus Google Kontakte holen**: Du meldest
 dich in einem eigenen Fenster bei Google an und erlaubst das Lesen deiner Kontakte. Dein
-Browser holt sie direkt bei Google; der Zugang wird nicht gespeichert.
+Browser holt sie direkt bei Google; der Zugang wird nicht gespeichert. Genauso funktioniert
+**Aus Microsoft-Konto holen** für Outlook und Microsoft 365.
+
+**LinkedIn** gibt die eigenen Kontakte nur als Datei heraus: Unter „Einstellungen & Datenschutz"
+im Bereich „Datenschutz" den Punkt „Kopie Ihrer Daten anfordern" öffnen und „Kontakte"
+ankreuzen. Das Archiv (.zip), das LinkedIn dir schickt, wählst du unverändert als Datei aus
+oder ziehst es auf die Seite; die Tabelle `Connections.csv` allein geht ebenfalls.
+E-Mail-Adressen stehen nur bei Kontakten drin, die das bei LinkedIn erlauben, Telefonnummern
+fehlen.
+
+Ist das Adressbuch auf einem Android-Gerät als App installiert, erscheint es außerdem beim
+**Teilen** einer Kontaktdatei in der Auswahl, zum Beispiel in der App „Kontakte". Die Datei
+bleibt dabei auf dem Gerät.
 
 Vor dem Übernehmen zeigt die App, was schon vorhanden ist. Liest du dieselbe Datei noch
 einmal ein, werden die Einträge aktualisiert und nicht verdoppelt. Gehört ein Eintrag sicher
@@ -192,6 +204,8 @@ Werden beim Bauen fest in die App übernommen. Vorlage: [.env.example](.env.exam
 | `VITE_SIGNALING_URL` | Adresse des Vermittlungsdienstes, falls er getrennt von der App läuft, z. B. `wss://signal.example.org/signal` |
 | `VITE_ICE_SERVERS` | STUN/TURN-Server als JSON-Liste, z. B. mit eigenem TURN-Server |
 | `VITE_GOOGLE_CLIENT_ID` | Kennung für „Aus Google Kontakte holen", siehe unten. Ohne Angabe fehlt diese Quelle. |
+| `VITE_MICROSOFT_CLIENT_ID` | Kennung für „Aus Microsoft-Konto holen", siehe unten. Ohne Angabe fehlt diese Quelle. |
+| `VITE_MICROSOFT_TENANT` | Welche Microsoft-Konten sich anmelden dürfen: `common` (Standard, private und geschäftliche), `consumers`, `organizations` oder die Kennung einer Organisation. |
 | `PORT` (Dienst) | Port des Vermittlungsdienstes, Standard `8080` |
 | `STATIC_DIR` (Dienst) | Ordner der gebauten App, Standard `../dist`; `off` schaltet die Auslieferung ab |
 
@@ -212,6 +226,34 @@ Werden beim Bauen fest in die App übernommen. Vorlage: [.env.example](.env.exam
 Im Testbetrieb lässt Google nur die Konten zu, die im Zustimmungsbildschirm als Testnutzer
 eingetragen sind. Für alle anderen verlangt Google eine Prüfung der App. Die Kontakte gehen
 direkt von Google an den Browser; der Vermittlungsdienst ist nicht beteiligt.
+
+### Microsoft-Kontakte freischalten (freiwillig)
+
+1. Im [Microsoft Entra Admin Center](https://entra.microsoft.com/) unter „App-Registrierungen"
+   eine neue Registrierung anlegen. Bei den unterstützten Kontotypen „Konten in einem
+   beliebigen Organisationsverzeichnis und persönliche Microsoft-Konten" wählen, wenn sich
+   private und geschäftliche Konten anmelden sollen.
+2. Unter „Authentifizierung" die Plattform **Single-Page-Anwendung** hinzufügen und als
+   Umleitungs-URI die Adresse der App mit `/oauth.html` eintragen
+   (z. B. `https://adressbuch.example.org/oauth.html`). Die Plattform „Web" funktioniert
+   nicht, weil der Browser den Zugang dann nicht selbst abholen darf.
+3. Unter „API-Berechtigungen" die delegierte Berechtigung **Contacts.Read** von Microsoft
+   Graph hinzufügen.
+4. Die „Anwendungs-ID (Client)" als `VITE_MICROSOFT_CLIENT_ID` in `.env` eintragen und neu
+   bauen. Sie ist öffentlich und kein Geheimnis; ein geheimer Clientschlüssel wird nicht
+   gebraucht.
+
+Gelesen werden die Kontakte aus dem Standardordner des Kontos. In manchen Organisationen muss
+ein Administrator der App erst zustimmen. Die Kontakte gehen direkt von Microsoft an den
+Browser; der Vermittlungsdienst ist nicht beteiligt.
+
+### Teilen aus anderen Apps (Android)
+
+Das Manifest meldet das Adressbuch als Ziel für geteilte Kontaktdateien an (`share_target`).
+Der Service Worker nimmt die Datei unter `./share` entgegen, legt sie kurz im Zwischenspeicher
+des Browsers ab und öffnet „Kontakte übernehmen". Das funktioniert nur in der installierten
+App und nur in Browsern, die das unterstützen (Chrome und verwandte auf Android). Nach einem
+Update kann es einen Tag dauern, bis Android das geänderte Manifest übernimmt.
 
 ### Was der Vermittlungsdienst sieht – und was nicht
 

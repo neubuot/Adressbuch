@@ -15,6 +15,7 @@
 import type { RemoteCard } from '../types';
 import { splitStreet } from '../store/migrate';
 import type { ImportedContact } from './vcard';
+import { ImportAccessError, oauthRedirectUri, openOAuthPopup, randomToken } from './oauth-popup';
 
 export const GOOGLE_SOURCE_ID = 'google';
 export const GOOGLE_SOURCE_NAME = 'Google Kontakte';
@@ -34,48 +35,20 @@ export function canImportFromGoogle(): boolean {
 }
 
 /** Adresse der kleinen Seite, die das Ergebnis der Anmeldung zurückreicht */
-export function googleRedirectUri(): string {
-  const url = new URL('oauth.html', document.baseURI);
-  url.hash = '';
-  url.search = '';
-  return url.toString();
-}
+export const googleRedirectUri = oauthRedirectUri;
 
-export class GoogleImportError extends Error {
-  constructor(
-    message: string,
-    readonly kind: 'cancelled' | 'blocked' | 'denied' | 'network'
-  ) {
-    super(message);
-  }
-}
-
-function randomState(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-/** Kanal, über den oauth.html das Ergebnis der Anmeldung zurückreicht */
-export const OAUTH_CHANNEL = 'adressbuch-oauth';
-const ACCESS_TIMEOUT_MS = 5 * 60 * 1000;
+export { ImportAccessError as GoogleImportError };
 
 /**
  * Öffnet das Anmeldefenster von Google und liefert einen kurzlebigen Zugang.
  * Muss direkt aus einem Tipp oder Klick heraus aufgerufen werden, sonst
  * unterdrückt der Browser das Fenster.
- *
- * Das Ergebnis kommt über einen Kanal zwischen Fenstern derselben Adresse
- * (BroadcastChannel) zurück, ersatzweise als Nachricht an dieses Fenster.
- * Ob das Anmeldefenster noch offen ist, lässt sich nicht verlässlich
- * feststellen (Google trennt die Verbindung zwischen den Fenstern). Deshalb
- * endet das Warten nur durch Ergebnis, Abbruch über `signal` oder Zeitablauf.
  */
-export function requestGoogleAccess(signal?: AbortSignal): Promise<string> {
-  const state = randomState();
+export async function requestGoogleAccess(signal?: AbortSignal): Promise<string> {
+  const state = randomToken();
   const params = new URLSearchParams({
     client_id: getGoogleClientId(),
-    redirect_uri: googleRedirectUri(),
+    redirect_uri: oauthRedirectUri(),
     response_type: 'token',
     scope: SCOPE,
     state,
@@ -83,51 +56,10 @@ export function requestGoogleAccess(signal?: AbortSignal): Promise<string> {
     include_granted_scopes: 'false',
   });
 
-  const popup = window.open(`${AUTH_URL}?${params.toString()}`, 'adressbuch-google', 'popup,width=520,height=680');
-  if (!popup) {
-    return Promise.reject(new GoogleImportError('Das Anmeldefenster wurde vom Browser unterdrückt.', 'blocked'));
-  }
-
-  return new Promise<string>((resolve, reject) => {
-    let done = false;
-    const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel(OAUTH_CHANNEL) : null;
-
-    const finish = (action: () => void) => {
-      if (done) return;
-      done = true;
-      window.removeEventListener('message', onMessage);
-      signal?.removeEventListener('abort', onAbort);
-      window.clearTimeout(timer);
-      channel?.close();
-      try {
-        popup.close();
-      } catch {
-        // Fenster ist schon zu oder nicht mehr erreichbar
-      }
-      action();
-    };
-
-    const accept = (data: unknown) => {
-      const message = data as { type?: string; hash?: string } | null;
-      if (!message || message.type !== OAUTH_CHANNEL || typeof message.hash !== 'string') return;
-      const result = new URLSearchParams(message.hash.replace(/^#/, ''));
-      if (result.get('state') !== state) return; // gehört nicht zu dieser Anmeldung
-      const token = result.get('access_token');
-      if (token) finish(() => resolve(token));
-      else finish(() => reject(new GoogleImportError('Google hat den Zugriff nicht erlaubt.', 'denied')));
-    };
-
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin === window.location.origin) accept(event.data);
-    };
-    const onAbort = () => finish(() => reject(new GoogleImportError('Die Anmeldung wurde abgebrochen.', 'cancelled')));
-    const timer = window.setTimeout(onAbort, ACCESS_TIMEOUT_MS);
-
-    if (channel) channel.onmessage = (event) => accept(event.data);
-    window.addEventListener('message', onMessage);
-    if (signal?.aborted) onAbort();
-    else signal?.addEventListener('abort', onAbort);
-  });
+  const result = await openOAuthPopup(`${AUTH_URL}?${params.toString()}`, state, 'adressbuch-google', signal);
+  const token = result.get('access_token');
+  if (!token) throw new ImportAccessError('Google hat den Zugriff nicht erlaubt.', 'denied');
+  return token;
 }
 
 // --- Zuordnung ---
@@ -279,12 +211,12 @@ export async function fetchGoogleContacts(accessToken: string): Promise<Imported
         cache: 'no-store',
       });
     } catch {
-      throw new GoogleImportError('Google ist gerade nicht erreichbar.', 'network');
+      throw new ImportAccessError('Google ist gerade nicht erreichbar.', 'network');
     }
     if (response.status === 401 || response.status === 403) {
-      throw new GoogleImportError('Google hat den Zugriff auf die Kontakte nicht erlaubt.', 'denied');
+      throw new ImportAccessError('Google hat den Zugriff auf die Kontakte nicht erlaubt.', 'denied');
     }
-    if (!response.ok) throw new GoogleImportError('Google hat mit einem Fehler geantwortet.', 'network');
+    if (!response.ok) throw new ImportAccessError('Google hat mit einem Fehler geantwortet.', 'network');
 
     const body = (await response.json()) as { connections?: GooglePerson[]; nextPageToken?: string };
     if (Array.isArray(body.connections)) people.push(...body.connections);
