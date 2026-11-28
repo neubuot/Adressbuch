@@ -966,3 +966,36 @@ button.row {
     transition: background-color 0.12s ease, color 0.12s ease;
   }
 }
+
+/* ---------- Mehrfachauswahl in der Kontaktliste ---------- */
+
+label.row {
+  cursor: pointer;
+}
+
+label.row:hover {
+  background: var(--c-fill);
+}
+
+.row-check {
+  flex: none;
+  width: 1.375rem;
+  height: 1.375rem;
+  margin: 0 var(--s-1);
+  accent-color: var(--c-ink);
+}
+
+.bulk-bar {
+  margin-top: 0;
+}
+
+.bulk-bar .bulk-count {
+  font-weight: 500;
+  margin-right: auto;
+}
+
+.bulk-bar select.input {
+  width: auto;
+  max-width: 100%;
+  flex: 1 1 11rem;
+}

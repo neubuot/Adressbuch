@@ -878,21 +878,36 @@ export class AutomergeStore {
    * Entfernt einen Kontakt samt zugehöriger Einträge der Änderungsübersicht
    */
   async removeConnection(id: string): Promise<void> {
-    await this.change(`Kontakt ${id} entfernt`, (doc) => {
-      delete doc.connections[id];
-      for (const [introId, intro] of Object.entries(doc.introsOut ?? {})) {
-        if (intro.aId === id || intro.bId === id) delete doc.introsOut![introId];
+    await this.removeConnections([id]);
+  }
+
+  /**
+   * Entfernt mehrere Kontakte in einem Schritt (Mehrfachauswahl). Gibt
+   * zurück, wie viele es tatsächlich waren.
+   */
+  async removeConnections(ids: string[]): Promise<number> {
+    const present = [...new Set(ids)].filter((id) => !!this.doc.connections[id]);
+    if (present.length === 0) return 0;
+    const gone = new Set(present);
+    const label = present.length === 1 ? `Kontakt ${present[0]} entfernt` : `${present.length} Kontakte entfernt`;
+    await this.change(label, (doc) => {
+      for (const id of present) {
+        delete doc.connections[id];
+        // Der Kontakt hält dann keinen erreichbaren Teil mehr
+        if (doc.trust?.members[id]) delete doc.trust.members[id];
+        const dropIndex = doc.trustDropped ? doc.trustDropped.indexOf(id) : -1;
+        if (dropIndex !== -1) doc.trustDropped!.splice(dropIndex, 1);
       }
-      // Der Kontakt hält dann keinen erreichbaren Teil mehr
-      if (doc.trust?.members[id]) delete doc.trust.members[id];
-      const dropIndex = doc.trustDropped ? doc.trustDropped.indexOf(id) : -1;
-      if (dropIndex !== -1) doc.trustDropped!.splice(dropIndex, 1);
+      for (const [introId, intro] of Object.entries(doc.introsOut ?? {})) {
+        if (gone.has(intro.aId) || gone.has(intro.bId)) delete doc.introsOut![introId];
+      }
       if (doc.activity) {
         for (let i = doc.activity.length - 1; i >= 0; i--) {
-          if (doc.activity[i].connectionId === id) doc.activity.splice(i, 1);
+          if (gone.has(doc.activity[i].connectionId)) doc.activity.splice(i, 1);
         }
       }
     });
+    return present.length;
   }
 
   // --- Vorstellen ---
@@ -1181,6 +1196,40 @@ export class AutomergeStore {
         if (index !== -1) connection.tagIds.splice(index, 1);
       }
     });
+  }
+
+  /** Vergibt einen Tag an mehrere Kontakte. Gibt zurück, bei wie vielen er neu ist. */
+  async addTagToConnections(connectionIds: string[], tagId: string): Promise<number> {
+    if (!this.doc.tags?.[tagId]) return 0;
+    const targets = [...new Set(connectionIds)].filter((id) => {
+      const connection = this.doc.connections[id];
+      return !!connection && !(connection.tagIds ?? []).includes(tagId);
+    });
+    if (targets.length === 0) return 0;
+    await this.change(`Tag ${tagId} an ${targets.length} Kontakte vergeben`, (doc) => {
+      for (const id of targets) {
+        const connection = doc.connections[id];
+        if (!connection.tagIds) connection.tagIds = [];
+        connection.tagIds.push(tagId);
+      }
+    });
+    return targets.length;
+  }
+
+  /** Nimmt einen Tag von mehreren Kontakten. Gibt zurück, bei wie vielen er stand. */
+  async removeTagFromConnections(connectionIds: string[], tagId: string): Promise<number> {
+    const targets = [...new Set(connectionIds)].filter((id) =>
+      (this.doc.connections[id]?.tagIds ?? []).includes(tagId)
+    );
+    if (targets.length === 0) return 0;
+    await this.change(`Tag ${tagId} von ${targets.length} Kontakten entfernt`, (doc) => {
+      for (const id of targets) {
+        const tagIds = doc.connections[id].tagIds!;
+        const index = tagIds.indexOf(tagId);
+        if (index !== -1) tagIds.splice(index, 1);
+      }
+    });
+    return targets.length;
   }
 
   async setConnectionTags(connectionId: string, tagIds: string[]): Promise<void> {
