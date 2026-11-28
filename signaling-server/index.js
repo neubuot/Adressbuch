@@ -12,6 +12,7 @@
  *
  * Umgebungsvariablen:
  *   PORT        Port (Standard 8080)
+ *   HOST        Adresse, auf der der Dienst lauscht (Standard: alle; hinter einem Reverse-Proxy 127.0.0.1)
  *   STATIC_DIR  Ordner mit der gebauten App (Standard ../dist; "off" schaltet die Auslieferung ab)
  */
 
@@ -22,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
 const PORT = Number(process.env.PORT || 8080);
+const HOST = process.env.HOST || undefined;
 const here = path.dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR =
   process.env.STATIC_DIR === 'off'
@@ -262,7 +264,7 @@ const heartbeat = setInterval(() => {
 
 wss.on('close', () => clearInterval(heartbeat));
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   const serving = STATIC_DIR && fs.existsSync(STATIC_DIR) ? `, App aus ${STATIC_DIR}` : '';
-  console.log(`Vermittlungsdienst läuft auf Port ${PORT}${serving}`);
+  console.log(`Vermittlungsdienst läuft auf ${HOST || 'allen Adressen'}, Port ${PORT}${serving}`);
 });

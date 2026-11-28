@@ -215,6 +215,8 @@ Werden beim Bauen fest in die App übernommen. Vorlage: [.env.example](.env.exam
 | `VITE_MICROSOFT_CLIENT_ID` | Kennung für „Aus Microsoft-Konto holen", siehe unten. Ohne Angabe fehlt diese Quelle. |
 | `VITE_MICROSOFT_TENANT` | Welche Microsoft-Konten sich anmelden dürfen: `common` (Standard, private und geschäftliche), `consumers`, `organizations` oder die Kennung einer Organisation. |
 | `PORT` (Dienst) | Port des Vermittlungsdienstes, Standard `8080` |
+| `HOST` (Dienst) | Adresse, auf der der Dienst lauscht. Ohne Angabe alle Adressen. Hinter einem Reverse-Proxy `127.0.0.1` setzen. |
+| `SOURCEMAP` (Build) | `1` erzeugt Source-Maps. Ohne Angabe werden keine gebaut. |
 | `STATIC_DIR` (Dienst) | Ordner der gebauten App, Standard `../dist`; `off` schaltet die Auslieferung ab |
 
 `GET /healthz` antwortet mit `ok` und eignet sich für die Überwachung.

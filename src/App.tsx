@@ -2,30 +2,33 @@
  * App-Gerüst: Titel, Navigation und die jeweils gewählte Ansicht
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { AppProvider, useAppContext } from './context/AppContext';
 import { href, useRoute } from './router';
 import { ContactsView } from './views/ContactsView';
 import { ContactView } from './views/ContactView';
-import { ShareView } from './views/ShareView';
-import { ConnectView } from './views/ConnectView';
 import { MyCardView } from './views/MyCardView';
 import { MoreView } from './views/MoreView';
-import { TagsView } from './views/TagsView';
-import { ExportView } from './views/ExportView';
 import { NewsView } from './views/NewsView';
-import { ImportView } from './views/ImportView';
-import { BackupView } from './views/BackupView';
-import { DuplicatesView } from './views/DuplicatesView';
-import { SourcesView } from './views/SourcesView';
-import { NetCheckView } from './views/NetCheckView';
 import { countUnseen, getActivitySeenAt } from './model/activity';
 import { OnboardingView } from './views/OnboardingView';
 import { Page } from './ui/Page';
 import './styles/tokens.css';
 import './styles/app.css';
 
-export function buildAppTitle(firstName: string | undefined, lastName: string | undefined): string {
+// Selten gebrauchte Ansichten werden erst beim Öffnen geladen.
+// Der Service Worker hält sie vor, sie stehen also auch offline bereit.
+const ShareView = lazy(() => import('./views/ShareView').then((m) => ({ default: m.ShareView })));
+const ConnectView = lazy(() => import('./views/ConnectView').then((m) => ({ default: m.ConnectView })));
+const TagsView = lazy(() => import('./views/TagsView').then((m) => ({ default: m.TagsView })));
+const ExportView = lazy(() => import('./views/ExportView').then((m) => ({ default: m.ExportView })));
+const ImportView = lazy(() => import('./views/ImportView').then((m) => ({ default: m.ImportView })));
+const BackupView = lazy(() => import('./views/BackupView').then((m) => ({ default: m.BackupView })));
+const DuplicatesView = lazy(() => import('./views/DuplicatesView').then((m) => ({ default: m.DuplicatesView })));
+const SourcesView = lazy(() => import('./views/SourcesView').then((m) => ({ default: m.SourcesView })));
+const NetCheckView = lazy(() => import('./views/NetCheckView').then((m) => ({ default: m.NetCheckView })));
+
+function buildAppTitle(firstName: string | undefined, lastName: string | undefined): string {
   const name = [firstName, lastName]
     .map((part) => (part || '').trim())
     .filter(Boolean)
@@ -199,7 +202,7 @@ function AppContent() {
         ))}
       </nav>
       <main className="shell-main" id="inhalt" ref={mainRef} tabIndex={-1}>
-        {renderView(route)}
+        <Suspense fallback={<p className="muted">Wird geladen …</p>}>{renderView(route)}</Suspense>
       </main>
     </div>
   );
