@@ -16,14 +16,29 @@ export function displayNameOfCard(card: RemoteCard | undefined | null): string {
 }
 
 /**
+ * Woran man einen Eintrag ohne Namen erkennt: E-Mail-Adresse oder Nummer.
+ * Telefonbücher enthalten oft Einträge, die nur daraus bestehen.
+ */
+export function contactHint(card: RemoteCard | undefined | null): string {
+  if (!card) return '';
+  for (const field of ['emailPrivate', 'emailWork', 'phoneMobile', 'phoneWork', 'website'] as const) {
+    const value = (card[field] || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+/**
  * Der Name, unter dem ein Kontakt angezeigt wird: eigene Bezeichnung,
- * sonst der Name von der Karte, sonst der zuletzt bekannte Name.
+ * sonst der Name von der Karte, sonst der zuletzt bekannte Name, sonst
+ * E-Mail-Adresse oder Nummer.
  */
 export function contactName(connection: Connection): string {
   return (
     (connection.label || '').trim() ||
     displayNameOfCard(connection.remoteCard) ||
     (connection.knownName || '').trim() ||
+    contactHint(connection.remoteCard) ||
     'Neuer Kontakt'
   );
 }
