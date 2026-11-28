@@ -73,6 +73,13 @@ describe('Kontakt', () => {
     expect(contactName(contact('y', {}))).toBe('Neuer Kontakt');
   });
 
+  it('zeigt bei Einträgen ohne Namen die E-Mail-Adresse oder Nummer', () => {
+    expect(contactName(contact('m', { remoteCard: { phoneMobile: '+49 171 5550100', emailWork: 'a@example.org' } }))).toBe('a@example.org');
+    expect(contactName(contact('n', { remoteCard: { phoneWork: ' 089 5550100 ' } }))).toBe('089 5550100');
+    expect(contactName(contact('o', { remoteCard: { phoneMobile: '0171', organization: 'Eis AG' } }))).toBe('Eis AG');
+    expect(contactName(contact('p', { remoteCard: { city: 'Passau' } }))).toBe('Neuer Kontakt');
+  });
+
   it('beschreibt den Zustand in Alltagssprache', () => {
     expect(contactState(contact('a', { status: 'online' })).label).toBe('Aktuell');
     expect(contactState(contact('a', { status: 'offline' })).label).toBe('Wartet auf Verbindung');

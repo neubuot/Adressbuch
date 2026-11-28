@@ -183,3 +183,20 @@ describe('Sicherung', () => {
     expect(isBackupFile('kein json')).toBe(false);
   }, 20000);
 });
+
+describe('vCard ohne Namen', () => {
+  it('übernimmt Einträge, die nur aus Nummer oder E-Mail bestehen, und lässt ganz leere weg', () => {
+    const text = [
+      'BEGIN:VCARD', 'VERSION:2.1', 'TEL;CELL:+49 171 5550100', 'END:VCARD',
+      'BEGIN:VCARD', 'VERSION:3.0', 'EMAIL;TYPE=INTERNET:jemand@example.org', 'END:VCARD',
+      'BEGIN:VCARD', 'VERSION:3.0', 'N:;;;;', 'FN:', 'END:VCARD',
+      '',
+    ].join('\r\n');
+    const contacts = parseVCards(text);
+    expect(contacts).toHaveLength(2);
+    expect(contacts[0].card.firstName).toBeUndefined();
+    expect(contacts[0].card.lastName).toBeUndefined();
+    expect(Object.values(contacts[0].card).join(' ')).toContain('5550100');
+    expect(Object.values(contacts[1].card).join(' ')).toContain('jemand@example.org');
+  });
+});
