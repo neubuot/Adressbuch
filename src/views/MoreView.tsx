@@ -13,10 +13,17 @@ import { InstallCard } from '../ui/InstallCard';
 import { MANUAL_SOURCE_ID } from '../types';
 import { findDuplicates } from '../model/dedupe';
 import { getVersionInfo, versionLine } from '../version';
+import { getMailbox, isMailboxEnabled, setMailboxEnabled } from '../box/mailbox';
 
 export const MoreView: React.FC = () => {
   const { appState } = useAppContext();
   const [theme, setThemeState] = useState<Theme>(getTheme);
+  const [mailbox, setMailboxState] = useState<boolean>(isMailboxEnabled);
+  const toggleMailbox = (enabled: boolean) => {
+    setMailboxEnabled(enabled);
+    setMailboxState(enabled);
+    if (enabled) void getMailbox()?.sync();
+  };
   const lastBackup = getLastBackupAt();
   const tagCount = Object.keys(appState.tags ?? {}).length;
   const contactCount = Object.keys(appState.connections).length;
@@ -146,16 +153,45 @@ export const MoreView: React.FC = () => {
         </div>
       </Section>
 
+      <Section title="Postfach">
+        <div className="stack small">
+          <label className="option">
+            <input
+              type="checkbox"
+              checked={mailbox}
+              onChange={(event) => toggleMailbox(event.target.checked)}
+            />
+            <span className="option-text">
+              <span className="option-title">Postfach nutzen</span>
+              <span className="option-desc">
+                Änderungen kommen auch an, wenn dein Kontakt gerade nicht online ist.
+              </span>
+            </span>
+          </label>
+          <p className="muted">
+            Dafür legt die App für jeden verbundenen Kontakt den Stand, den er sehen darf,
+            verschlüsselt beim Vermittlungsdienst ab. Lesen können ihn nur dein Kontakt und du. Der
+            Dienst sieht, wann und von welcher Netzadresse ein Fach geschrieben oder abgeholt wird,
+            aber weder Inhalt noch Namen.
+          </p>
+          <p className="muted">
+            Ohne Postfach kommen Änderungen nur an, wenn ihr beide die App gleichzeitig geöffnet
+            habt. Bereits abgelegte Stände bleiben beim Ausschalten liegen, bis sie nach einem
+            halben Jahr verfallen.
+          </p>
+        </div>
+      </Section>
+
       <Section title="So funktioniert es">
         <div className="stack small">
           <p>
-            Dein Adressbuch liegt nur auf diesem Gerät. Es gibt kein Konto und keinen zentralen
-            Speicher. Jeder pflegt seine eigene Karte und legt für jeden Kontakt fest, was dieser
-            sehen darf.
+            Dein Adressbuch liegt nur auf diesem Gerät. Es gibt kein Konto. Jeder pflegt seine
+            eigene Karte und legt für jeden Kontakt fest, was dieser sehen darf.
           </p>
           <p>
-            Änderungen gehen direkt von Gerät zu Gerät. Dafür müssen beide die App gleichzeitig
-            geöffnet haben; sonst wird die Änderung beim nächsten Mal nachgeholt.
+            Änderungen gehen direkt von Gerät zu Gerät, wenn beide die App geöffnet haben. Ist dein
+            Kontakt gerade nicht da, wartet die Änderung verschlüsselt im Postfach und kommt an,
+            sobald er die App öffnet.
           </p>
         </div>
       </Section>

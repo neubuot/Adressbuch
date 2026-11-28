@@ -101,7 +101,7 @@ export function contactState(connection: Connection): ContactState {
     kind: 'waiting',
     label: 'Wartet auf Verbindung',
     detail:
-      'Änderungen werden übertragen, sobald ihr beide die App gleichzeitig geöffnet habt.',
+      'Ihr seid gerade nicht direkt verbunden. Änderungen warten im Postfach oder kommen an, sobald ihr beide die App geöffnet habt.',
   };
 }
 

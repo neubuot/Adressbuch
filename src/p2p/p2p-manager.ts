@@ -20,9 +20,12 @@ import {
 import { store } from '../store/automerge-store';
 import type { SignalData } from 'simple-peer';
 import { getCustody, putRecovery, type VaultPiece } from '../trust/custody';
+import { Mailbox, setMailbox } from '../box/mailbox';
 
 export interface P2PManagerConfig {
   signalingUrl: string;
+  /** Adresse des Postfachs; ohne Angabe gibt es keines */
+  boxUrl?: string;
 }
 
 /** Ereignisse für die Oberfläche */
@@ -103,6 +106,13 @@ export class P2PManager implements SyncHost {
       this.localPrivateKey = keyPair.privateKey;
       this.localFingerprint = await createFingerprint(this.localPubKey);
       if (this.destroyed) return;
+
+      // Postfach: Änderungen kommen auch an, wenn der Kontakt gerade nicht da ist
+      if (this.config.boxUrl) {
+        const mailbox = new Mailbox(this.config.boxUrl, keyPair);
+        setMailbox(mailbox);
+        mailbox.start();
+      }
 
       const signaling = new SignalingClient(this.config.signalingUrl, this.localSessionId);
       this.signalingClient = signaling;
@@ -597,6 +607,7 @@ export class P2PManager implements SyncHost {
    */
   destroy(): void {
     this.destroyed = true;
+    setMailbox(null);
     if (this.unsubscribeStore) {
       this.unsubscribeStore();
       this.unsubscribeStore = null;

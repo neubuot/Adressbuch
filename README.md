@@ -2,7 +2,7 @@
 
 [![Doichain Seal](https://doi-api.sendlabs.de/seal/github/neubuot/Adressbuch/seal.svg)](https://doi-api.sendlabs.de/seal/github/neubuot/Adressbuch)
 
-Ein Adressbuch, das sich selbst aktuell hält – ohne Konto und ohne zentralen Speicher.
+Ein Adressbuch, das sich selbst aktuell hält – ohne Konto. Dein Adressbuch liegt nur auf deinem Gerät.
 
 Jeder pflegt nur seine **eigene Karte** und legt für jeden Kontakt einzeln fest, was dieser
 davon sehen darf. Ändert jemand seine Nummer oder Adresse, steht sie bei allen verbundenen
@@ -62,9 +62,11 @@ was die andere Person von dir sehen darf, und tippe auf **Verbinden**. (Wer kein
 Lasst beide die Seite geöffnet, bis **Verbunden** erscheint. Das dauert meist nur einen
 Augenblick.
 
-> **Gut zu wissen:** Änderungen kommen an, wenn ihr beide die App gleichzeitig geöffnet habt.
-> Ist die andere Person gerade nicht da, steht beim Kontakt „Wartet auf Verbindung" – die
-> Änderung wird beim nächsten Mal von selbst nachgeholt.
+> **Gut zu wissen:** Änderungen gehen direkt von Gerät zu Gerät, wenn ihr beide die App
+> geöffnet habt. Ist die andere Person gerade nicht da, steht beim Kontakt „Wartet auf
+> Verbindung". Die Änderung wartet dann verschlüsselt im **Postfach** und kommt an, sobald
+> die andere Person die App öffnet (ab Version 0.6.0 auf beiden Seiten). Das Postfach lässt
+> sich unter **Mehr** ausschalten.
 
 ### 4. Freigabe ändern oder widerrufen
 
@@ -259,6 +261,8 @@ Werden beim Bauen fest in die App übernommen. Vorlage: [.env.example](.env.exam
 | `HOST` (Dienst) | Adresse, auf der der Dienst lauscht. Ohne Angabe alle Adressen. Hinter einem Reverse-Proxy `127.0.0.1` setzen. |
 | `SOURCEMAP` (Build) | `1` erzeugt Source-Maps. Ohne Angabe werden keine gebaut. |
 | `STATIC_DIR` (Dienst) | Ordner der gebauten App, Standard `../dist`; `off` schaltet die Auslieferung ab |
+| `BOX_DIR` (Dienst) | Ordner für die Fächer des Postfachs. Ohne Angabe liegen sie nur im Arbeitsspeicher und gehen beim Neustart verloren; `off` schaltet das Postfach ab |
+| `VITE_BOX_URL` | Adresse des Postfachs, falls es nicht neben dem Vermittlungsdienst unter `/box` liegt |
 
 `GET /healthz` antwortet mit `ok` und eignet sich für die Überwachung.
 
@@ -474,8 +478,19 @@ Kontakt, es wird nur der Teil übergeben (`RECOVER_PUT`, `RECOVER_ACK`).
   als du ausgibt, erhält dein Adressbuch samt Geräteschlüssel. Der Schutz hängt deshalb daran,
   dass Vertraute vor dem Helfen wirklich nachfragen. Teil und Tresor liegen bei ihnen
   unverschlüsselt in der Datenbank des Browsers.
-- **Beide müssen gleichzeitig online sein.** Es gibt keinen Zwischenspeicher; Änderungen
-  werden beim nächsten gemeinsamen Online-Sein nachgeholt.
+- **Postfach:** Damit Änderungen auch ankommen, wenn nicht beide gleichzeitig online sind,
+  legt die App für jeden verbundenen Kontakt den Stand, den er sehen darf, verschlüsselt beim
+  Vermittlungsdienst ab (ein Fach je Richtung, immer nur der letzte Stand, Verfall nach 180
+  Tagen). Schlüssel und Kennung des Fachs berechnen beide Geräte aus dem eigenen privaten und
+  dem öffentlichen Schlüssel des anderen (ECDH über P-256, HKDF, AES-256-GCM). Der Dienst kann
+  den Inhalt nicht lesen. Er sieht aber, wann und von welcher Netzadresse ein Fach geschrieben
+  oder abgeholt wird, und kann daraus schließen, welche Netzadressen miteinander zu tun haben.
+  Es gibt keine Folgenlosigkeit: Wer später einen privaten Geräteschlüssel erbeutet und Fächer
+  aufgezeichnet hat, kann sie nachträglich lesen. Der Geräteschlüssel dient zugleich dem
+  Signieren und der Schlüsselvereinbarung. Die Umsetzung ist von niemandem außer dem Autor
+  geprüft.
+- **Nur Karten gehen über das Postfach.** Verbinden, Vorstellen und das Hinterlegen bei
+  Vertrauten brauchen weiterhin beide Geräte gleichzeitig.
 - **Ein Gerät pro Adressbuch.** Dasselbe Adressbuch auf mehreren eigenen Geräten zu führen,
   wird (noch) nicht unterstützt.
 - Die Daten liegen unverschlüsselt in der Datenbank des Browsers. Wer Zugriff auf das

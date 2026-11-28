@@ -19,6 +19,20 @@ export function getSignalingUrl(): string {
   return url.toString();
 }
 
+/**
+ * Adresse des Postfachs. Ohne Angabe liegt es neben dem Vermittlungsdienst
+ * (Pfad /box statt /signal). Überschreibbar beim Bauen mit VITE_BOX_URL.
+ */
+export function getBoxUrl(): string {
+  const configured = import.meta.env.VITE_BOX_URL;
+  if (configured) return configured;
+
+  const url = new URL(getSignalingUrl());
+  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+  url.pathname = url.pathname.replace(/signal\/?$/, 'box');
+  return url.toString();
+}
+
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun.services.mozilla.com' },
