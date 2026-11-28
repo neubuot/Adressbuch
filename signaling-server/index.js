@@ -7,13 +7,19 @@
  *      nur zufällige Sitzungs-IDs, Raumcodes und technische Verbindungsdaten.
  *   2. Liefert auf Wunsch die gebaute App aus (Ordner ../dist), damit für
  *      den Betrieb ein einziger Dienst genügt.
+ *   3. Postfach (Pfad /box): lagert auf den Geräten verschlüsselte Karten
+ *      zwischen, damit Änderungen auch ankommen, wenn nicht beide Geräte
+ *      gleichzeitig online sind. Der Dienst kann den Inhalt nicht lesen.
+ *      Einzelheiten in box.js.
  *
- * Es wird nichts gespeichert.
+ * Außer den Fächern des Postfachs wird nichts gespeichert.
  *
  * Umgebungsvariablen:
  *   PORT        Port (Standard 8080)
  *   HOST        Adresse, auf der der Dienst lauscht (Standard: alle; hinter einem Reverse-Proxy 127.0.0.1)
  *   STATIC_DIR  Ordner mit der gebauten App (Standard ../dist; "off" schaltet die Auslieferung ab)
+ *   BOX_DIR     Ordner für die Fächer des Postfachs. Ohne Angabe liegen sie nur im
+ *               Arbeitsspeicher und gehen beim Neustart verloren. "off" schaltet das Postfach ab.
  */
 
 import http from 'node:http';
@@ -21,6 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { createBox } from './box.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || undefined;
@@ -29,6 +36,9 @@ const STATIC_DIR =
   process.env.STATIC_DIR === 'off'
     ? null
     : path.resolve(process.env.STATIC_DIR || path.join(here, '..', 'dist'));
+
+const BOX_DIR = process.env.BOX_DIR || '';
+const box = BOX_DIR === 'off' ? null : createBox({ dir: BOX_DIR ? path.resolve(BOX_DIR) : '' });
 
 const MAX_MESSAGE_BYTES = 64 * 1024;
 const MAX_ROOMS_PER_PEER = 2000;
@@ -114,7 +124,22 @@ function serveStatic(req, res) {
   fs.createReadStream(filePath).pipe(res);
 }
 
-const server = http.createServer(serveStatic);
+const server = http.createServer((req, res) => {
+  if (!box) {
+    serveStatic(req, res);
+    return;
+  }
+  box
+    .handle(req, res)
+    .then((handled) => {
+      if (!handled) serveStatic(req, res);
+    })
+    .catch((error) => {
+      console.error('Postfach: Fehler', error);
+      if (!res.headersSent) res.writeHead(500);
+      res.end();
+    });
+});
 
 // --- Vermittlung ---
 
@@ -266,5 +291,6 @@ wss.on('close', () => clearInterval(heartbeat));
 
 server.listen(PORT, HOST, () => {
   const serving = STATIC_DIR && fs.existsSync(STATIC_DIR) ? `, App aus ${STATIC_DIR}` : '';
-  console.log(`Vermittlungsdienst läuft auf ${HOST || 'allen Adressen'}, Port ${PORT}${serving}`);
+  const boxInfo = !box ? ', Postfach aus' : box.persistent ? `, Postfach in ${path.resolve(BOX_DIR)}` : ', Postfach im Arbeitsspeicher';
+  console.log(`Vermittlungsdienst läuft auf ${HOST || 'allen Adressen'}, Port ${PORT}${serving}${boxInfo}`);
 });

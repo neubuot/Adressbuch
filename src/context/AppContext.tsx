@@ -7,7 +7,7 @@ import { store, type StoreBlock } from '../store/automerge-store';
 import { initP2PManager, getP2PManager } from '../p2p/p2p-manager';
 import type { SignalingStatus } from '../p2p/signaling';
 import type { AppState } from '../types';
-import { getSignalingUrl } from '../config';
+import { getSignalingUrl, getBoxUrl } from '../config';
 import { contactName } from '../model/contact';
 
 interface AppContextValue {
@@ -67,7 +67,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Den Browser bitten, die Daten nicht von sich aus zu löschen
       void navigator.storage?.persist?.().catch(() => undefined);
 
-      const manager = initP2PManager({ signalingUrl: getSignalingUrl() });
+      const manager = initP2PManager({ signalingUrl: getSignalingUrl(), boxUrl: getBoxUrl() });
       unsubscribeStatus = manager.onServiceStatus(setServiceStatus);
       unsubscribeLink = manager.onLink((event) => {
         if (event.type !== 'linked' || !event.viaIntro) return;
