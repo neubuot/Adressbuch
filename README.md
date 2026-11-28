@@ -81,6 +81,18 @@ oder gar nichts mehr. Ihre App entfernt die Angaben nach Ablauf von selbst, auch
 gerade nicht verbunden seid. Voraussetzung ist, dass auch sie die App ab Version 0.5.0 nutzt;
 mit einer älteren Version verschwinden die Angaben erst beim nächsten Abgleich mit dir.
 
+### Kontakte einander vorstellen
+
+Du kennst zwei Personen, die sich noch nicht kennen? Öffne einen der beiden Kontakte, wähle
+**Jemandem vorstellen** und dann die andere Person. Beide finden die Vorstellung unter
+**Aktuelles** und können sie annehmen oder ablehnen. Stimmen beide zu, werden sie direkt
+miteinander verbunden, ohne Code und ohne sich zu treffen.
+
+- Weitergegeben wird nur der Name der jeweils anderen Person, so wie er bei dir steht.
+- Was die beiden voneinander sehen, legt jeder beim Annehmen selbst fest.
+- Lehnt jemand ab, erfährt das niemand. Eine unbeantwortete Vorstellung verfällt nach 30 Tagen.
+- Du musst mit beiden je einmal gleichzeitig online sein, damit die Vorstellung ankommt.
+
 ### 5. Daten sichern
 
 **Dein Adressbuch liegt nur auf deinem Gerät.** Geht das Gerät verloren oder löschst du die
@@ -413,6 +425,11 @@ bestätigt sind, stehen in `AppState.notDuplicates`.
 Ist die Freigabe befristet, nennt `PATCH` zusätzlich das Ende (`until`) und die Felder, die
 danach bleiben (`keep`). Beide Seiten setzen die Frist selbst um.
 
+Über eine bestehende Verbindung laufen außerdem Vorstellungen: `INTRO` nennt Namen und
+öffentlichen Schlüssel einer dritten Person, `INTRO_ACK` bestätigt den Empfang. Haben beide
+Vorgestellten zugestimmt, treffen sie sich in dem Raum, der sich aus ihren beiden Kennungen
+ergibt, und weisen sich wie üblich per Signatur aus.
+
 ---
 
 ## Sicherheit und Grenzen
@@ -420,6 +437,8 @@ danach bleiben (`keep`). Beide Seiten setzen die Frist selbst um.
 - Die direkte Verbindung zwischen zwei Geräten ist verschlüsselt (WebRTC/DTLS).
 - Jedes Gerät hat ein Schlüsselpaar; beim Verbinden weist jede Seite per Signatur nach, dass
   ihr der genannte Schlüssel gehört. Neue Kontakte entstehen nur über eine offene Einladung.
+  Ausnahme ist eine Vorstellung durch einen gemeinsamen Kontakt, der beide zugestimmt haben.
+  Wie verlässlich der dabei genannte Name ist, hängt vom Vertrauen in den Vorstellenden ab.
 - Empfangene Daten werden auf bekannte Textfelder begrenzt.
 - **Beide müssen gleichzeitig online sein.** Es gibt keinen Zwischenspeicher; Änderungen
   werden beim nächsten gemeinsamen Online-Sein nachgeholt.

@@ -33,16 +33,66 @@ export const NewsView: React.FC = () => {
   const birthdays = useMemo(() => upcomingBirthdays(connections, 30), [connections]);
   const quiet = useMemo(() => longNoContact(connections, 6).slice(0, 10), [connections]);
   const changes = useMemo(() => [...(appState.activity ?? [])].reverse(), [appState.activity]);
+  const intros = useMemo(
+    () =>
+      Object.entries(appState.introsIn ?? {})
+        .map(([fingerprint, intro]) => ({ fingerprint, intro }))
+        .sort((a, b) => b.intro.receivedAt.localeCompare(a.intro.receivedAt)),
+    [appState.introsIn]
+  );
 
-  const nothing = birthdays.length === 0 && quiet.length === 0 && changes.length === 0;
+  const nothing = birthdays.length === 0 && quiet.length === 0 && changes.length === 0 && intros.length === 0;
+
+  const dropIntro = async (fingerprint: string, name: string, accepted: boolean) => {
+    await store.dropIntro(fingerprint);
+    notify(accepted ? `Du wartest nicht mehr auf ${name}.` : `Vorstellung abgelehnt. ${name} erfährt davon nichts.`);
+  };
 
   return (
     <Page title="Aktuelles">
       {nothing && (
         <p className="muted">
-          Hier siehst du, wenn ein Kontakt etwas geändert hat, wer bald Geburtstag hat und bei wem du
-          dich lange nicht gemeldet hast. Im Moment gibt es nichts Neues.
+          Hier siehst du, wenn ein Kontakt etwas geändert hat, wenn dich jemand vorstellt, wer bald Geburtstag
+          hat und bei wem du dich lange nicht gemeldet hast. Im Moment gibt es nichts Neues.
         </p>
+      )}
+
+      {intros.length > 0 && (
+        <Section title="Vorstellungen">
+          <ul className="list">
+            {intros.map(({ fingerprint, intro }) => {
+              const introducer = appState.connections[intro.fromId];
+              const from = introducer ? contactName(introducer) : 'Ein früherer Kontakt';
+              const name = intro.name || 'jemandem';
+              const accepted = intro.status === 'accepted';
+              return (
+                <li className="row" key={fingerprint} data-testid="intro">
+                  <Avatar name={name} />
+                  <span className="row-main">
+                    <span className="row-title">
+                      {accepted ? `Du wartest auf ${name}` : `${from} möchte dich mit ${name} bekannt machen`}
+                    </span>
+                    <span className="row-sub">
+                      {accepted
+                        ? `Ihr werdet verbunden, sobald auch ${name} zugestimmt hat und ihr beide die App geöffnet habt.`
+                        : `Vorgestellt am ${formatDate(intro.receivedAt)}. Erst wenn ihr beide zustimmt, werdet ihr verbunden.`}
+                    </span>
+                    <span className="actions" style={{ marginTop: 'var(--s-2)' }}>
+                      {!accepted && (
+                        <a className="btn btn-primary" href={href('vorstellung', fingerprint)}>
+                          Annehmen
+                        </a>
+                      )}
+                      <button type="button" className="btn btn-quiet" onClick={() => dropIntro(fingerprint, name, accepted)}>
+                        {accepted ? 'Zurückziehen' : 'Ablehnen'}
+                      </button>
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
       )}
 
       {changes.length > 0 && (

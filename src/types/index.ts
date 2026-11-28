@@ -244,6 +244,39 @@ export interface ActivityEntry {
   newValue: string;
 }
 
+/**
+ * Vorstellung, die ich ausgesprochen habe: Zwei meiner Kontakte sollen sich
+ * kennenlernen. Bleibt gespeichert, bis beide sie erhalten haben.
+ */
+export interface IntroOut {
+  id: string;
+  aId: string;
+  bId: string;
+  createdAt: string;
+  deliveredA?: boolean;
+  deliveredB?: boolean;
+}
+
+/**
+ * Vorstellung, die ich erhalten habe. Der Schlüssel in `introsIn` ist die
+ * Kennung (Fingerabdruck) der vorgestellten Person.
+ */
+export interface IntroIn {
+  id: string;
+  /** Kontakt, der die Vorstellung ausgesprochen hat */
+  fromId: string;
+  pubKey: string;
+  /** Name der vorgestellten Person, so wie ihn der Vorstellende kennt */
+  name: string;
+  receivedAt: string;
+  status: 'pending' | 'accepted';
+  /** Was die vorgestellte Person von mir sehen darf (nach dem Annehmen) */
+  fields?: string[];
+}
+
+/** Wie lange eine unbeantwortete oder nicht zustande gekommene Vorstellung bestehen bleibt */
+export const INTRO_MAX_AGE_DAYS = 30;
+
 export interface AppState {
   schemaVersion: string;
   myCard: AddressCard;
@@ -255,6 +288,10 @@ export interface AppState {
   notDuplicates?: Record<string, boolean>;
   activity: ActivityEntry[];
   knownPeers: string[];
+  /** Vorstellungen, die ich ausgesprochen habe (ab Schema 2.2) */
+  introsOut?: Record<string, IntroOut>;
+  /** Vorstellungen, die ich erhalten habe (Schlüssel: Kennung der Person) */
+  introsIn?: Record<string, IntroIn>;
 }
 
 // --- Nachrichten zwischen zwei Geräten ---
@@ -297,7 +334,22 @@ export interface AckMessage {
   hash?: string;
 }
 
+/** "Ich möchte dich mit dieser Person bekannt machen" */
+export interface IntroMessage {
+  type: 'INTRO';
+  id: string;
+  pubKey: string;
+  name: string;
+}
+
+export interface IntroAckMessage {
+  type: 'INTRO_ACK';
+  id: string;
+}
+
 export type P2PMessage =
+  | IntroMessage
+  | IntroAckMessage
   | HelloMessage
   | AuthMessage
   | PolicyMessage

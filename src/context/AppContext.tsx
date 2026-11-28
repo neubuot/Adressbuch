@@ -8,6 +8,7 @@ import { initP2PManager, getP2PManager } from '../p2p/p2p-manager';
 import type { SignalingStatus } from '../p2p/signaling';
 import type { AppState } from '../types';
 import { getSignalingUrl } from '../config';
+import { contactName } from '../model/contact';
 
 interface AppContextValue {
   appState: AppState;
@@ -38,11 +39,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [serviceStatus, setServiceStatus] = useState<SignalingStatus>('connecting');
   const [toast, setToast] = useState<{ id: number; message: string } | null>(null);
   const toastTimer = useRef<number | null>(null);
+  const showToastRef = useRef<(message: string) => void>(() => undefined);
+  const showToast = (message: string) => showToastRef.current(message);
 
   useEffect(() => {
     let cancelled = false;
     let unsubscribeStatus: (() => void) | null = null;
     let expiryTimer: number | null = null;
+    let unsubscribeLink: (() => void) | null = null;
 
     const unsubscribeStore = store.onChange((doc) => setAppState(doc));
 
@@ -57,6 +61,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // Befristete Freigaben: beim Start und danach regelmäßig auf Ablauf prüfen
       await store.expireShares();
+      await store.pruneIntros();
       expiryTimer = window.setInterval(() => void store.expireShares(), 30000);
 
       // Den Browser bitten, die Daten nicht von sich aus zu löschen
@@ -64,6 +69,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       const manager = initP2PManager({ signalingUrl: getSignalingUrl() });
       unsubscribeStatus = manager.onServiceStatus(setServiceStatus);
+      unsubscribeLink = manager.onLink((event) => {
+        if (event.type !== 'linked' || !event.viaIntro) return;
+        const connection = store.getDoc().connections[event.connectionId];
+        const name = connection ? contactName(connection) : 'der vorgestellten Person';
+        showToast(`Du bist jetzt mit ${name} verbunden.`);
+      });
       await manager.init();
       if (!cancelled) setServiceStatus(manager.getServiceStatus());
     };
@@ -78,6 +89,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (expiryTimer !== null) clearInterval(expiryTimer);
       unsubscribeStore();
       unsubscribeStatus?.();
+      unsubscribeLink?.();
       getP2PManager()?.destroy();
     };
   }, []);
@@ -87,6 +99,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setToast({ id: Date.now(), message });
     toastTimer.current = window.setTimeout(() => setToast(null), 4500);
   }, []);
+  showToastRef.current = notify;
 
   return (
     <AppContext.Provider value={{ appState, isLoaded, block, serviceStatus, notify }}>

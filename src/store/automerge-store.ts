@@ -10,6 +10,7 @@ import {
   LEGACY_SOURCE_ID,
   MANUAL_SOURCE_ID,
   SCHEMA_VERSION,
+  INTRO_MAX_AGE_DAYS,
   createEmptyCard,
   pairKey,
   recordKey,
@@ -877,11 +878,160 @@ export class AutomergeStore {
   async removeConnection(id: string): Promise<void> {
     await this.change(`Kontakt ${id} entfernt`, (doc) => {
       delete doc.connections[id];
+      for (const [introId, intro] of Object.entries(doc.introsOut ?? {})) {
+        if (intro.aId === id || intro.bId === id) delete doc.introsOut![introId];
+      }
       if (doc.activity) {
         for (let i = doc.activity.length - 1; i >= 0; i--) {
           if (doc.activity[i].connectionId === id) doc.activity.splice(i, 1);
         }
       }
+    });
+  }
+
+  // --- Vorstellen ---
+
+  /**
+   * Stellt zwei verbundene Kontakte einander vor. Gibt die Kennung der
+   * Vorstellung zurück oder null, wenn sie nicht möglich ist (kein
+   * verbundener Kontakt, dieselbe Person, schon unterwegs).
+   */
+  async addIntro(aId: string, bId: string): Promise<string | null> {
+    const a = this.doc.connections[aId];
+    const b = this.doc.connections[bId];
+    if (!a || !b || aId === bId || a.kind === 'local' || b.kind === 'local') return null;
+    const pair = pairKey(aId, bId);
+    const pending = Object.values(this.doc.introsOut ?? {}).some((intro) => pairKey(intro.aId, intro.bId) === pair);
+    if (pending) return null;
+
+    const id = createUuid();
+    await this.change(`Vorstellung ${aId} und ${bId}`, (doc) => {
+      if (!doc.introsOut) doc.introsOut = {};
+      doc.introsOut[id] = { id, aId, bId, createdAt: new Date().toISOString() };
+    });
+    return id;
+  }
+
+  /** Nimmt eine noch nicht zugestellte Vorstellung zurück */
+  async cancelIntroOut(id: string): Promise<void> {
+    if (!this.doc.introsOut?.[id]) return;
+    await this.change(`Vorstellung ${id} zurückgenommen`, (doc) => {
+      if (doc.introsOut?.[id]) delete doc.introsOut[id];
+    });
+  }
+
+  /** Die Gegenseite hat die Vorstellung erhalten; sind es beide, ist sie erledigt */
+  async markIntroDelivered(id: string, connectionId: string): Promise<void> {
+    const intro = this.doc.introsOut?.[id];
+    if (!intro || (intro.aId !== connectionId && intro.bId !== connectionId)) return;
+    await this.change(`Vorstellung ${id} zugestellt`, (doc) => {
+      const entry = doc.introsOut?.[id];
+      if (!entry) return;
+      if (entry.aId === connectionId) entry.deliveredA = true;
+      if (entry.bId === connectionId) entry.deliveredB = true;
+      if (entry.deliveredA && entry.deliveredB) delete doc.introsOut![id];
+    });
+  }
+
+  /**
+   * Nimmt eine erhaltene Vorstellung entgegen. `fingerprint` ist die Kennung
+   * der vorgestellten Person. Gibt false zurück, wenn sie (noch) nicht
+   * angenommen werden kann; dann versucht es die Gegenseite später erneut.
+   */
+  async receiveIntro(
+    fromId: string,
+    intro: { id: string; pubKey: string; name: string },
+    fingerprint: string,
+    ownFingerprint: string
+  ): Promise<boolean> {
+    if (!this.doc.connections[fromId]) return false;
+    // Mich selbst oder jemanden, mit dem ich schon verbunden bin: erledigt, nichts zu tun
+    if (fingerprint === ownFingerprint) return true;
+    const known = this.doc.connections[fingerprint];
+    if (known && known.kind !== 'local') return true;
+    if (this.doc.introsIn?.[fingerprint]) return true;
+    if (Object.keys(this.doc.introsIn ?? {}).length >= 30) return false;
+
+    const name = intro.name.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 120);
+    await this.change(`Vorstellung von ${fromId} erhalten`, (doc) => {
+      if (!doc.introsIn) doc.introsIn = {};
+      doc.introsIn[fingerprint] = {
+        id: intro.id,
+        fromId,
+        pubKey: intro.pubKey,
+        name,
+        receivedAt: new Date().toISOString(),
+        status: 'pending',
+      };
+    });
+    return true;
+  }
+
+  /** Nimmt eine Vorstellung an; `fields` sieht die vorgestellte Person von mir */
+  async acceptIntro(fingerprint: string, fields: string[]): Promise<void> {
+    if (!this.doc.introsIn?.[fingerprint]) return;
+    await this.change(`Vorstellung ${fingerprint} angenommen`, (doc) => {
+      const intro = doc.introsIn?.[fingerprint];
+      if (!intro) return;
+      intro.status = 'accepted';
+      intro.fields = fields.filter(isCardField);
+    });
+  }
+
+  /** Lehnt eine Vorstellung ab oder zieht die eigene Zusage zurück */
+  async dropIntro(fingerprint: string): Promise<void> {
+    if (!this.doc.introsIn?.[fingerprint]) return;
+    await this.change(`Vorstellung ${fingerprint} verworfen`, (doc) => {
+      if (doc.introsIn?.[fingerprint]) delete doc.introsIn[fingerprint];
+    });
+  }
+
+  /**
+   * Aus einer angenommenen Vorstellung wird ein verbundener Kontakt.
+   * Gibt false zurück, wenn es keine passende, angenommene Vorstellung gibt.
+   */
+  async completeIntro(fingerprint: string, pubKey: string): Promise<boolean> {
+    const intro = this.doc.introsIn?.[fingerprint];
+    if (!intro || intro.status !== 'accepted' || intro.pubKey !== pubKey) return false;
+    const fields = [...(intro.fields ?? [])];
+    const name = intro.name;
+    const introducer = this.doc.connections[intro.fromId];
+    const introducerName = introducer
+      ? (introducer.label || '').trim() || displayNameOfCard(introducer.remoteCard) || (introducer.knownName || '').trim()
+      : '';
+
+    await this.change(`Kontakt ${fingerprint} über eine Vorstellung hinzugefügt`, (doc) => {
+      const local = doc.connections[fingerprint];
+      doc.connections[fingerprint] = {
+        id: fingerprint,
+        kind: 'linked',
+        peerPubKey: pubKey,
+        allowedFields: fields,
+        storeRemoteCard: true,
+        status: 'offline',
+        createdAt: local?.createdAt || new Date().toISOString(),
+      };
+      const connection = doc.connections[fingerprint];
+      if (name) connection.knownName = name;
+      if (introducerName) connection.private = { source: `Vorgestellt von ${introducerName}` };
+      if (doc.introsIn?.[fingerprint]) delete doc.introsIn[fingerprint];
+    });
+    return true;
+  }
+
+  /** Entfernt Vorstellungen, die zu lange unbeantwortet oder unzugestellt sind */
+  async pruneIntros(now: number = Date.now()): Promise<void> {
+    const limit = now - INTRO_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+    const tooOld = (iso: string) => {
+      const time = Date.parse(iso);
+      return !Number.isFinite(time) || time < limit;
+    };
+    const oldIn = Object.entries(this.doc.introsIn ?? {}).filter(([, intro]) => tooOld(intro.receivedAt)).map(([key]) => key);
+    const oldOut = Object.entries(this.doc.introsOut ?? {}).filter(([, intro]) => tooOld(intro.createdAt)).map(([key]) => key);
+    if (oldIn.length === 0 && oldOut.length === 0) return;
+    await this.change('Alte Vorstellungen entfernt', (doc) => {
+      for (const key of oldIn) if (doc.introsIn?.[key]) delete doc.introsIn[key];
+      for (const key of oldOut) if (doc.introsOut?.[key]) delete doc.introsOut[key];
     });
   }
 
