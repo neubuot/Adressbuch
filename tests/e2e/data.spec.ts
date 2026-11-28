@@ -461,6 +461,8 @@ test('Doppelte Einträge zusammenführen und wieder trennen; Import zurücknehme
 
   // Wieder trennen
   await page.getByRole('button', { name: 'Wieder trennen' }).click();
+  // Erst neu laden, wenn die Trennung gespeichert ist (der Knopf verschwindet danach)
+  await expect(page.getByRole('button', { name: 'Wieder trennen' })).toBeHidden();
   await page.goto('/');
   await expect(page.getByText('2 Kontakte', { exact: true })).toBeVisible();
   await page.goto('/#/mehr/doppelt');
