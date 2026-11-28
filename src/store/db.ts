@@ -22,9 +22,23 @@ export interface StoredConnection {
   remoteCardSnapshot?: Uint8Array;
 }
 
+/** Aufbewahrtes für die Wiederherstellung über Vertraute (siehe trust/custody.ts) */
+export interface StoredVaultPiece {
+  id: string;
+  setId: string;
+  threshold: number;
+  share: string;
+  version: string;
+  vault: string;
+  receivedAt: string;
+  helperName?: string;
+}
+
 export class AddressBookDB extends Dexie {
   documents!: Table<StoredDocument, string>;
   connections!: Table<StoredConnection, string>;
+  custody!: Table<StoredVaultPiece, string>;
+  recovery!: Table<StoredVaultPiece & { helperName: string }, string>;
 
   constructor() {
     super('P2PAddressBook');
@@ -32,6 +46,14 @@ export class AddressBookDB extends Dexie {
     this.version(1).stores({
       documents: 'id, updatedAt',
       connections: 'id, status, lastSyncAt',
+    });
+
+    // Version 2: Ablage für die Wiederherstellung über Vertraute
+    this.version(2).stores({
+      documents: 'id, updatedAt',
+      connections: 'id, status, lastSyncAt',
+      custody: 'id',
+      recovery: 'id',
     });
   }
 }

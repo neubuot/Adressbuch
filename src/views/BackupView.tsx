@@ -161,6 +161,11 @@ export const BackupView: React.FC = () => {
       lead="Dein Adressbuch liegt nur auf diesem Gerät. Eine Sicherung schützt dich, wenn das Gerät verloren geht oder die Browserdaten gelöscht werden."
       back={{ href: href('mehr'), label: 'Mehr' }}
     >
+      <p className="small">
+        Ergänzend oder stattdessen: <a href={href('mehr', 'vertraute')}>Wiederherstellung über Vertraute</a>, ganz ohne
+        Datei und Passwort.
+      </p>
+
       <Section title="Sicherung erstellen">
         <form className="stack" onSubmit={create}>
           <p className="small muted">

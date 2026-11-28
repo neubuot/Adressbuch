@@ -24,6 +24,7 @@ import { activeLimit, effectiveFields, projectFields, sanitizeLimit } from '../u
 import { mailHref, mapHref, phoneHref, saveToAddressBook } from '../model/actions';
 import { ADDRESS_CARD_FIELDS, type AddressCardField, type ContactPrivate, type ContactPrivateField, type RemoteCard } from '../types';
 import { mergeRecords } from '../model/merge';
+import { deleteCustody } from '../trust/custody';
 
 type Dialog = 'revoke' | 'remove' | null;
 
@@ -154,6 +155,7 @@ export const ContactView: React.FC<{ connectionId: string }> = ({ connectionId }
       await store.setShare(connectionId, []);
       await new Promise((resolve) => setTimeout(resolve, 600));
     }
+    await deleteCustody(connectionId);
     await store.removeConnection(connectionId);
     notify(`${name} wurde entfernt.`);
     navigate();
@@ -359,6 +361,22 @@ export const ContactView: React.FC<{ connectionId: string }> = ({ connectionId }
             </a>
           </div>
         </Section>
+      )}
+
+      {!isLocal && connection.custody && (
+        <div className="note section" data-testid="custody-note">
+          <p className="note-title">Du bist eine Vertrauensperson</p>
+          <p className="small">
+            {name} hat dich als Vertrauten gewählt. Du bewahrst einen Teil des Schlüssels zu einem verschlüsselten
+            Tresor mit dem Adressbuch von {name} auf. Lesen kannst du damit nichts. Verliert {name} das Gerät, hilfst
+            du beim Zurückholen.
+          </p>
+          <div className="actions">
+            <a className="btn" href={href('kontakt', connectionId, 'helfen')}>
+              Bei der Wiederherstellung helfen
+            </a>
+          </div>
+        </div>
       )}
 
       <Section title="Meine Notizen · nur für mich">

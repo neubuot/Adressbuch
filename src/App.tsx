@@ -28,6 +28,9 @@ const DuplicatesView = lazy(() => import('./views/DuplicatesView').then((m) => (
 const SourcesView = lazy(() => import('./views/SourcesView').then((m) => ({ default: m.SourcesView })));
 const IntroduceView = lazy(() => import('./views/IntroViews').then((m) => ({ default: m.IntroduceView })));
 const IntroAcceptView = lazy(() => import('./views/IntroViews').then((m) => ({ default: m.IntroAcceptView })));
+const TrustView = lazy(() => import('./views/TrustViews').then((m) => ({ default: m.TrustView })));
+const HelpRecoverView = lazy(() => import('./views/TrustViews').then((m) => ({ default: m.HelpRecoverView })));
+const RecoverView = lazy(() => import('./views/TrustViews').then((m) => ({ default: m.RecoverView })));
 const NetCheckView = lazy(() => import('./views/NetCheckView').then((m) => ({ default: m.NetCheckView })));
 
 function buildAppTitle(firstName: string | undefined, lastName: string | undefined): string {
@@ -62,6 +65,7 @@ function renderView(route: string[]): React.ReactNode {
     case 'kontakt':
       if (!second) return <ContactsView />;
       if (third === 'vorstellen') return <IntroduceView key={second} connectionId={second} />;
+      if (third === 'helfen') return <HelpRecoverView key={second} connectionId={second} />;
       return third === 'freigabe' ? (
         <ShareView key={second} connectionId={second} />
       ) : (
@@ -76,6 +80,8 @@ function renderView(route: string[]): React.ReactNode {
       return second ? <IntroAcceptView key={second} fingerprint={second} /> : <NewsView />;
     case 'karte':
       return <MyCardView />;
+    case 'wiederherstellen':
+      return <RecoverView />;
     case 'mehr':
       if (second === 'tags') return <TagsView />;
       if (second === 'export') return <ExportView />;
@@ -84,6 +90,7 @@ function renderView(route: string[]): React.ReactNode {
       if (second === 'doppelt') return <DuplicatesView />;
       if (second === 'quellen') return <SourcesView />;
       if (second === 'verbindung') return <NetCheckView />;
+      if (second === 'vertraute') return <TrustView />;
       return <MoreView />;
     default:
       return (
@@ -165,6 +172,16 @@ function AppContent() {
     !appState.myCard.lastName &&
     Object.keys(appState.connections).length === 0;
   const restoring = route[0] === 'mehr' && route[1] === 'sicherung';
+  if (isEmpty && !onboarded && route[0] === 'wiederherstellen') {
+    // Wiederherstellung über Vertraute: ohne Navigation, es gibt noch kein Adressbuch
+    return (
+      <main className="shell-main" id="inhalt">
+        <Suspense fallback={<p className="muted">Wird geladen …</p>}>
+          <RecoverView />
+        </Suspense>
+      </main>
+    );
+  }
   if (isEmpty && !onboarded && !restoring) {
     return (
       <OnboardingView

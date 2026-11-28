@@ -23,12 +23,14 @@ import {
   type MergedContact,
   type RemoteCard,
   type SourceRecord,
+  type TrustSetup,
 } from '../types';
 import { manualOverrides, mergeRecords } from '../model/merge';
 import type { IncomingContact } from '../model/dedupe';
 import { createUuid, isFromNewerApp, migrateState, needsMigration } from './migrate';
 import { isExpired, keepFields, sanitizeRemoteCard, type ShareLimit } from '../utils/policy';
 import { isCardField } from '../model/fields';
+import { createVaultKey, MAX_TRUSTED, MIN_TRUSTED } from '../trust/vault';
 import { displayNameOfCard } from '../model/contact';
 
 /** Wie viele Einträge die Änderungsübersicht höchstens behält */
@@ -881,6 +883,10 @@ export class AutomergeStore {
       for (const [introId, intro] of Object.entries(doc.introsOut ?? {})) {
         if (intro.aId === id || intro.bId === id) delete doc.introsOut![introId];
       }
+      // Der Kontakt hält dann keinen erreichbaren Teil mehr
+      if (doc.trust?.members[id]) delete doc.trust.members[id];
+      const dropIndex = doc.trustDropped ? doc.trustDropped.indexOf(id) : -1;
+      if (dropIndex !== -1) doc.trustDropped!.splice(dropIndex, 1);
       if (doc.activity) {
         for (let i = doc.activity.length - 1; i >= 0; i--) {
           if (doc.activity[i].connectionId === id) doc.activity.splice(i, 1);
@@ -1033,6 +1039,91 @@ export class AutomergeStore {
       for (const key of oldIn) if (doc.introsIn?.[key]) delete doc.introsIn[key];
       for (const key of oldOut) if (doc.introsOut?.[key]) delete doc.introsOut[key];
     });
+  }
+
+  // --- Wiederherstellung über Vertraute ---
+
+  /**
+   * Richtet die Wiederherstellung über Vertraute ein oder ändert sie. Es
+   * entsteht jedes Mal ein neuer Tresorschlüssel mit neuen Teilen, damit
+   * Teile aus einer früheren Einrichtung wertlos werden. Wer nicht mehr
+   * dazugehört, wird gebeten, das Aufbewahrte zu löschen.
+   * Gibt false zurück, wenn die Angaben nicht passen.
+   */
+  async setTrust(memberIds: string[], threshold: number): Promise<boolean> {
+    const ids = [...new Set(memberIds)].filter((id) => {
+      const connection = this.doc.connections[id];
+      return !!connection && connection.kind !== 'local';
+    });
+    if (ids.length < MIN_TRUSTED || ids.length > MAX_TRUSTED) return false;
+    if (!Number.isInteger(threshold) || threshold < 2 || threshold > ids.length) return false;
+
+    const { key, shares } = createVaultKey(ids.length, threshold);
+    const setId = createUuid();
+    await this.change('Vertraute für die Wiederherstellung festgelegt', (doc) => {
+      const previous = Object.keys(doc.trust?.members ?? {});
+      const dropped = new Set([...(doc.trustDropped ?? []), ...previous.filter((id) => !ids.includes(id))]);
+      for (const id of ids) dropped.delete(id);
+
+      const members: TrustSetup['members'] = {};
+      ids.forEach((id, index) => {
+        members[id] = { share: shares[index] };
+      });
+      doc.trust = { setId, threshold, key, createdAt: new Date().toISOString(), members };
+      doc.trustDropped = [...dropped];
+    });
+    return true;
+  }
+
+  /** Hebt die Einrichtung auf; alle bisherigen Vertrauten sollen das Aufbewahrte löschen */
+  async clearTrust(): Promise<void> {
+    if (!this.doc.trust) return;
+    await this.change('Wiederherstellung über Vertraute aufgehoben', (doc) => {
+      const dropped = new Set([...(doc.trustDropped ?? []), ...Object.keys(doc.trust?.members ?? {})]);
+      doc.trustDropped = [...dropped].filter((id) => !!doc.connections[id]);
+      delete doc.trust;
+    });
+  }
+
+  /** Der Kontakt hat den Tresor mit diesem Stand bestätigt */
+  async markDeposited(connectionId: string, setId: string, version: string): Promise<void> {
+    const trust = this.doc.trust;
+    if (!trust || trust.setId !== setId || !trust.members[connectionId]) return;
+    if (trust.members[connectionId].depositedAt === version) return;
+    await this.change(`Tresor bei ${connectionId} hinterlegt`, (doc) => {
+      const member = doc.trust?.members[connectionId];
+      if (member) member.depositedAt = version;
+    });
+  }
+
+  /** Alle Vertrauten erhalten beim nächsten Kontakt einen frischen Tresor */
+  async requestRedeposit(): Promise<void> {
+    const members = this.doc.trust?.members;
+    if (!members || !Object.values(members).some((member) => member.depositedAt)) return;
+    await this.change('Tresor wird neu hinterlegt', (doc) => {
+      for (const member of Object.values(doc.trust?.members ?? {})) {
+        if (member.depositedAt) delete member.depositedAt;
+      }
+    });
+  }
+
+  /** Ein früherer Vertrauter hat bestätigt, dass er nichts mehr aufbewahrt */
+  async markDropDelivered(connectionId: string): Promise<void> {
+    if (!this.doc.trustDropped?.includes(connectionId)) return;
+    await this.change(`${connectionId} bewahrt nichts mehr auf`, (doc) => {
+      const index = doc.trustDropped ? doc.trustDropped.indexOf(connectionId) : -1;
+      if (index !== -1) doc.trustDropped!.splice(index, 1);
+    });
+  }
+
+  /** Vermerkt, dass dieses Gerät für den Kontakt etwas aufbewahrt (oder nicht mehr) */
+  async setCustodyMarker(connectionId: string, marker: { setId: string; version: string } | null): Promise<void> {
+    const connection = this.doc.connections[connectionId];
+    if (!connection) return;
+    const current = connection.custody;
+    if (!marker && !current) return;
+    if (marker && current && current.setId === marker.setId && current.version === marker.version) return;
+    await this.updateConnection(connectionId, { custody: marker ?? undefined });
   }
 
   async clearActivity(): Promise<void> {

@@ -20,8 +20,12 @@ import { stableHash } from '../utils/hash';
 import { createFingerprint, createNonce, signText, verifyText } from '../utils/crypto';
 import { APP_VERSION, SCHEMA_VERSION, isSchemaCompatible, type P2PMessage } from '../types';
 import { contactName } from '../model/contact';
+import type { VaultPutMessage } from '../types';
+import { deleteCustody, getCustody, putCustody, type VaultPiece } from '../trust/custody';
+import { MAX_VAULT_CHARS, sealVault } from '../trust/vault';
+import { splitText, TextAssembler } from '../trust/chunks';
 
-export type ContactDecision = 'known' | 'new' | 'reject';
+export type ContactDecision = 'known' | 'new' | 'reject' | 'recovery';
 
 export interface SyncHost {
   localPubKey: string;
@@ -39,7 +43,16 @@ export interface SyncHost {
   onIncompatible(sessionId: string, connectionId: string): void;
   /** Wird aufgerufen, wenn die Verbindung abgewiesen wurde */
   onRejected(sessionId: string): void;
+  /** Die Verbindung dient einer Wiederherstellung über Vertraute und steht */
+  onRecoveryLinked(sessionId: string): Promise<void>;
+  /** Ein Vertrauter hat seinen Teil übergeben; true, wenn er angenommen wurde */
+  onRecoveryPiece(sessionId: string, piece: VaultPiece, from: string): Promise<boolean>;
+  /** Die Gegenseite hat den übergebenen Teil bestätigt */
+  onRecoveryDelivered(sessionId: string): void;
 }
+
+/** Wie alt ein hinterlegter Tresor höchstens sein darf, bevor er erneuert wird */
+const VAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const NO_CARD_YET = 'none';
 
@@ -58,6 +71,12 @@ export class SyncController {
   private lastSentHash: string | null = null;
   /** Vorstellungen, die in dieser Verbindung schon gesendet wurden */
   private sentIntros = new Set<string>();
+  /** true: Diese Verbindung dient nur einer Wiederherstellung über Vertraute */
+  private recoveryMode = false;
+  private vaultAsked: string | null = null;
+  private vaultDropSent = false;
+  private depositing = false;
+  private vaultIn = new TextAssembler(MAX_VAULT_CHARS);
   private queue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -106,6 +125,34 @@ export class SyncController {
         break;
       case 'INTRO':
         await this.handleIntro(message.id, message.pubKey, message.name);
+        break;
+      case 'VAULT_CHECK':
+        await this.handleVaultCheck();
+        break;
+      case 'VAULT_STATE':
+        await this.handleVaultState(message.setId, message.version);
+        break;
+      case 'VAULT_PUT':
+      case 'RECOVER_PUT':
+        await this.handleVaultPut(message);
+        break;
+      case 'VAULT_ACK':
+        if (this.ready && this.connectionId && typeof message.setId === 'string' && typeof message.version === 'string') {
+          await store.markDeposited(this.connectionId, message.setId, message.version);
+        }
+        break;
+      case 'RECOVER_ACK':
+        if (this.recoveryMode) this.host.onRecoveryDelivered(this.sessionId);
+        break;
+      case 'VAULT_DROP':
+        if (this.ready && this.connectionId) {
+          await deleteCustody(this.connectionId);
+          await store.setCustodyMarker(this.connectionId, null);
+          this.peerConnection.send({ type: 'VAULT_DROPPED' });
+        }
+        break;
+      case 'VAULT_DROPPED':
+        if (this.ready && this.connectionId) await store.markDropDelivered(this.connectionId);
         break;
       case 'INTRO_ACK':
         if (this.ready && this.connectionId && typeof message.id === 'string') {
@@ -171,6 +218,12 @@ export class SyncController {
       this.host.onRejected(this.sessionId);
       return;
     }
+    if (decision === 'recovery') {
+      // Kein Kontakt, kein Abgleich: nur die Übergabe für die Wiederherstellung
+      this.recoveryMode = true;
+      await this.host.onRecoveryLinked(this.sessionId);
+      return;
+    }
 
     this.connectionId = connectionId;
     const connection = store.getDoc().connections[connectionId];
@@ -183,6 +236,123 @@ export class SyncController {
     this.host.onLinked(this.sessionId, connectionId, decision === 'new');
     this.sendStateHash();
     this.sendIntros();
+    this.sendVaultCheck();
+  }
+
+  // --- Wiederherstellung über Vertraute ---
+
+  /**
+   * Ist dieser Kontakt ein Vertrauter, wird gefragt, welchen Stand des
+   * Tresors er aufbewahrt. Frühere Vertraute werden gebeten zu löschen.
+   */
+  private sendVaultCheck(): void {
+    if (!this.ready || !this.connectionId) return;
+    const doc = store.getDoc();
+    if (!this.vaultDropSent && doc.trustDropped?.includes(this.connectionId) && !doc.trust?.members[this.connectionId]) {
+      this.vaultDropSent = true;
+      this.peerConnection.send({ type: 'VAULT_DROP' });
+    }
+    const trust = doc.trust;
+    const member = trust?.members[this.connectionId];
+    if (!trust || !member) return;
+    const stamp = `${trust.setId}|${member.depositedAt ?? ''}`;
+    if (this.vaultAsked === stamp) return;
+    this.vaultAsked = stamp;
+    this.peerConnection.send({ type: 'VAULT_CHECK', setId: trust.setId });
+  }
+
+  /** Antwortet, was dieses Gerät für den Kontakt aufbewahrt */
+  private async handleVaultCheck(): Promise<void> {
+    if (!this.ready || !this.connectionId) return;
+    const custody = await getCustody(this.connectionId);
+    await store.setCustodyMarker(this.connectionId, custody ? { setId: custody.setId, version: custody.version } : null);
+    this.peerConnection.send({
+      type: 'VAULT_STATE',
+      setId: custody ? custody.setId : null,
+      version: custody ? custody.version : null,
+    });
+  }
+
+  /** Hinterlegt den Tresor neu, wenn der Kontakt keinen oder einen alten Stand hat */
+  private async handleVaultState(setId: unknown, version: unknown): Promise<void> {
+    if (!this.ready || !this.connectionId || this.depositing) return;
+    const trust = store.getDoc().trust;
+    const member = trust?.members[this.connectionId];
+    if (!trust || !member) return;
+
+    const age = typeof version === 'string' ? Date.now() - Date.parse(version) : NaN;
+    const current = setId === trust.setId && Number.isFinite(age) && age < VAULT_MAX_AGE_MS && !!member.depositedAt;
+    if (current) return;
+
+    this.depositing = true;
+    try {
+      const vault = await sealVault(
+        { snapshot: store.export(), keyPair: { publicKey: this.host.localPubKey, privateKey: this.host.localPrivateKey } },
+        trust.key
+      );
+      if (vault.length > MAX_VAULT_CHARS) {
+        console.warn('Das Adressbuch ist zu groß, um es bei Vertrauten zu hinterlegen');
+        return;
+      }
+      this.sendPiece('VAULT_PUT', {
+        setId: trust.setId,
+        threshold: trust.threshold,
+        share: member.share,
+        version: new Date().toISOString(),
+        vault,
+      });
+    } finally {
+      this.depositing = false;
+    }
+  }
+
+  private sendPiece(type: 'VAULT_PUT' | 'RECOVER_PUT', piece: VaultPiece, from?: string): void {
+    const parts = splitText(piece.vault);
+    parts.forEach((data, seq) => {
+      this.peerConnection.send({
+        type,
+        setId: piece.setId,
+        threshold: piece.threshold,
+        share: piece.share,
+        version: piece.version,
+        seq,
+        total: parts.length,
+        data,
+        ...(from ? { from } : {}),
+      });
+    });
+  }
+
+  /** Übergibt bei einer Wiederherstellung den aufbewahrten Teil samt Tresor */
+  sendRecoveryPiece(piece: VaultPiece, from: string): void {
+    if (!this.recoveryMode || this.destroyed) return;
+    this.sendPiece('RECOVER_PUT', piece, from);
+  }
+
+  private async handleVaultPut(message: VaultPutMessage): Promise<void> {
+    const forCustody = message.type === 'VAULT_PUT';
+    if (forCustody ? !this.ready || !this.connectionId : !this.recoveryMode) return;
+
+    const { setId, threshold, share, version } = message;
+    if (typeof setId !== 'string' || setId.length < 8 || setId.length > 80) return;
+    if (typeof share !== 'string' || share.length < 4 || share.length > 300) return;
+    if (typeof version !== 'string' || version.length > 40 || !Number.isFinite(Date.parse(version))) return;
+    if (typeof threshold !== 'number' || !Number.isInteger(threshold) || threshold < 2 || threshold > 255) return;
+
+    const vault = this.vaultIn.add(`${message.type}|${setId}|${version}|${share}`, message.seq, message.total, message.data);
+    if (vault === null) return;
+    const piece: VaultPiece = { setId, threshold, share, version, vault };
+
+    if (forCustody && this.connectionId) {
+      await putCustody(this.connectionId, piece);
+      await store.setCustodyMarker(this.connectionId, { setId, version });
+      this.peerConnection.send({ type: 'VAULT_ACK', setId, version });
+      return;
+    }
+    const from = typeof message.from === 'string' ? message.from.slice(0, 120) : '';
+    if (await this.host.onRecoveryPiece(this.sessionId, piece, from)) {
+      this.peerConnection.send({ type: 'RECOVER_ACK', setId, version });
+    }
   }
 
   /**
@@ -294,6 +464,7 @@ export class SyncController {
       this.sendPatch();
     }
     this.sendIntros();
+    this.sendVaultCheck();
   }
 
   /** Sendet die freigegebenen Felder in jedem Fall erneut */

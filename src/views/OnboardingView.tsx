@@ -73,6 +73,9 @@ export const OnboardingView: React.FC<{ invited: boolean; onDone: () => void }> 
         <p>
           <a href={href('mehr', 'sicherung')}>Ich habe schon ein Adressbuch und möchte eine Sicherung wiederherstellen</a>
         </p>
+        <p>
+          <a href={href('wiederherstellen')}>Ich habe Vertraute festgelegt und möchte mein Adressbuch über sie zurückholen</a>
+        </p>
       </div>
     </main>
   );
