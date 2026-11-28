@@ -19,12 +19,15 @@ import { activeLimit, effectiveFields, projectFields, sanitizeLimit, shareState 
 import { stableHash } from '../utils/hash';
 import { createFingerprint, createNonce, signText, verifyText } from '../utils/crypto';
 import { APP_VERSION, SCHEMA_VERSION, isSchemaCompatible, type P2PMessage } from '../types';
+import { contactName } from '../model/contact';
 
 export type ContactDecision = 'known' | 'new' | 'reject';
 
 export interface SyncHost {
   localPubKey: string;
   localPrivateKey: string;
+  /** Kennung dieses Geräts (Fingerabdruck des eigenen Schlüssels) */
+  localFingerprint: string;
   /**
    * Entscheidet, ob das Gerät mit dieser Kennung ein bekannter Kontakt ist,
    * als neuer Kontakt angelegt wird oder abgewiesen wird.
@@ -53,6 +56,8 @@ export class SyncController {
   private incompatible = false;
   private destroyed = false;
   private lastSentHash: string | null = null;
+  /** Vorstellungen, die in dieser Verbindung schon gesendet wurden */
+  private sentIntros = new Set<string>();
   private queue: Promise<void> = Promise.resolve();
 
   constructor(
@@ -98,6 +103,14 @@ export class SyncController {
         break;
       case 'ACK':
         await this.handleAck();
+        break;
+      case 'INTRO':
+        await this.handleIntro(message.id, message.pubKey, message.name);
+        break;
+      case 'INTRO_ACK':
+        if (this.ready && this.connectionId && typeof message.id === 'string') {
+          await store.markIntroDelivered(message.id, this.connectionId);
+        }
         break;
       default:
         // Unbekannte Nachrichten (z. B. von anderen Versionen) werden ignoriert
@@ -169,6 +182,42 @@ export class SyncController {
     this.ready = true;
     this.host.onLinked(this.sessionId, connectionId, decision === 'new');
     this.sendStateHash();
+    this.sendIntros();
+  }
+
+  /**
+   * Sendet Vorstellungen, die dieser Kontakt noch nicht erhalten hat:
+   * den Namen und den Schlüssel der jeweils anderen Person.
+   */
+  private sendIntros(): void {
+    if (!this.ready || !this.connectionId) return;
+    const doc = store.getDoc();
+    for (const intro of Object.values(doc.introsOut ?? {})) {
+      const isA = intro.aId === this.connectionId;
+      const isB = intro.bId === this.connectionId;
+      if (!isA && !isB) continue;
+      if ((isA && intro.deliveredA) || (isB && intro.deliveredB)) continue;
+      if (this.sentIntros.has(intro.id)) continue;
+      const other = doc.connections[isA ? intro.bId : intro.aId];
+      if (!other || other.kind === 'local' || !other.peerPubKey) continue;
+      this.sentIntros.add(intro.id);
+      this.peerConnection.send({ type: 'INTRO', id: intro.id, pubKey: other.peerPubKey, name: contactName(other) });
+    }
+  }
+
+  private async handleIntro(id: unknown, pubKey: unknown, name: unknown): Promise<void> {
+    if (!this.ready || !this.connectionId) return;
+    if (typeof id !== 'string' || id.length < 8 || id.length > 80) return;
+    if (typeof pubKey !== 'string' || pubKey.length < 16 || pubKey.length > 1000) return;
+    if (typeof name !== 'string') return;
+    let fingerprint: string;
+    try {
+      fingerprint = await createFingerprint(pubKey);
+    } catch {
+      return;
+    }
+    const accepted = await store.receiveIntro(this.connectionId, { id, pubKey, name }, fingerprint, this.host.localFingerprint);
+    if (accepted) this.peerConnection.send({ type: 'INTRO_ACK', id });
   }
 
   /** Teilt der Gegenseite mit, welchen Stand ihrer Karte ich habe */
@@ -244,6 +293,7 @@ export class SyncController {
     if (hash !== this.lastSentHash) {
       this.sendPatch();
     }
+    this.sendIntros();
   }
 
   /** Sendet die freigegebenen Felder in jedem Fall erneut */

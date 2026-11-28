@@ -26,7 +26,7 @@ export interface P2PManagerConfig {
 
 /** Ereignisse für die Oberfläche */
 export type LinkEvent =
-  | { type: 'linked'; connectionId: string; isNew: boolean; viaInvite: boolean }
+  | { type: 'linked'; connectionId: string; isNew: boolean; viaInvite: boolean; viaIntro?: boolean }
   | { type: 'incompatible'; connectionId: string }
   | { type: 'failed'; duringInvite: boolean };
 
@@ -54,7 +54,9 @@ export class P2PManager implements SyncHost {
   private localSessionId: string;
   localPubKey = '';
   localPrivateKey = '';
-  private localFingerprint = '';
+  localFingerprint = '';
+  /** Sitzungen, deren Kontakt gerade über eine Vorstellung entstanden ist */
+  private introSessions = new Set<string>();
   private links: Map<string, Link> = new Map(); // Sitzungs-ID → Verbindung
   private sessionRooms: Map<string, string> = new Map(); // Sitzungs-ID → Raum
   private persistentRooms: Map<string, string> = new Map(); // Kontakt-ID → Raum
@@ -141,6 +143,23 @@ export class P2PManager implements SyncHost {
     for (const connection of connections) {
       if (connection.kind === 'local') continue;
       await this.joinPersistentRoom(connection.id);
+    }
+    await this.joinIntroRooms();
+  }
+
+  private isAcceptedIntro(fingerprint: string): boolean {
+    return store.getDoc().introsIn?.[fingerprint]?.status === 'accepted';
+  }
+
+  /**
+   * Angenommene Vorstellungen: im gemeinsamen Raum auf die andere Person
+   * warten. Der Raum ergibt sich aus beiden Kennungen; eine Verbindung
+   * entsteht erst, wenn auch die andere Seite angenommen hat.
+   */
+  private async joinIntroRooms(): Promise<void> {
+    for (const [fingerprint, intro] of Object.entries(store.getDoc().introsIn ?? {})) {
+      if (intro.status !== 'accepted' || this.persistentRooms.has(fingerprint)) continue;
+      await this.joinPersistentRoom(fingerprint);
     }
   }
 
@@ -326,7 +345,8 @@ export class P2PManager implements SyncHost {
       const stillWanted =
         this.invite?.roomCode === roomCode ||
         Array.from(this.persistentRooms.entries()).some(
-          ([connectionId, code]) => code === roomCode && !!store.getDoc().connections[connectionId]
+          ([connectionId, code]) =>
+            code === roomCode && (!!store.getDoc().connections[connectionId] || this.isAcceptedIntro(connectionId))
         );
       if (!stillWanted) return;
       this.signalingClient.leaveRoom(roomCode);
@@ -342,6 +362,12 @@ export class P2PManager implements SyncHost {
 
     const existing = store.getDoc().connections[connectionId];
     if (existing && existing.kind !== 'local') return 'known';
+
+    // Beide haben eine Vorstellung angenommen: Der Schlüssel ist bekannt und geprüft
+    if (await store.completeIntro(connectionId, pubKey)) {
+      this.introSessions.add(sessionId);
+      return 'new';
+    }
 
     // Neue Kontakte entstehen nur über eine gerade offene Einladung
     const link = this.links.get(sessionId);
@@ -365,8 +391,9 @@ export class P2PManager implements SyncHost {
       this.rejoinAttempts.delete(roomCode);
     });
     if (link.roomCode) this.rejoinAttempts.delete(link.roomCode);
-    const viaInvite = isNew || (!!this.invite && link.roomCode === this.invite.roomCode);
-    this.emit({ type: 'linked', connectionId, isNew, viaInvite });
+    const viaIntro = this.introSessions.delete(sessionId);
+    const viaInvite = (isNew && !viaIntro) || (!!this.invite && link.roomCode === this.invite.roomCode);
+    this.emit({ type: 'linked', connectionId, isNew, viaInvite, ...(viaIntro ? { viaIntro } : {}) });
   }
 
   onIncompatible(_sessionId: string, connectionId: string): void {
@@ -400,8 +427,9 @@ export class P2PManager implements SyncHost {
     }
     // Entfernte Kontakte ohne aktive Verbindung ebenfalls vergessen
     for (const connectionId of Array.from(this.persistentRooms.keys())) {
-      if (!connections[connectionId]) this.forgetContact(connectionId);
+      if (!connections[connectionId] && !this.isAcceptedIntro(connectionId)) this.forgetContact(connectionId);
     }
+    void this.joinIntroRooms();
   }
 
   private forgetContact(connectionId: string): void {
@@ -493,6 +521,7 @@ export class P2PManager implements SyncHost {
     }
     this.persistentRooms.clear();
     this.sessionRooms.clear();
+    this.introSessions.clear();
     this.invite = null;
 
     if (this.signalingClient) {

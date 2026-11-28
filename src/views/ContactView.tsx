@@ -509,6 +509,11 @@ export const ContactView: React.FC<{ connectionId: string }> = ({ connectionId }
 
       <Section title={isLocal ? 'Eintrag' : 'Verbindung'}>
         <div className="actions">
+          {!isLocal && (
+            <a className="btn" href={href('kontakt', connectionId, 'vorstellen')}>
+              Jemandem vorstellen
+            </a>
+          )}
           {!isLocal && sharedFields.length > 0 && (
             <button type="button" className="btn" onClick={() => setDialog('revoke')}>
               Freigabe widerrufen

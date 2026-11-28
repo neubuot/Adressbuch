@@ -26,6 +26,8 @@ const ImportView = lazy(() => import('./views/ImportView').then((m) => ({ defaul
 const BackupView = lazy(() => import('./views/BackupView').then((m) => ({ default: m.BackupView })));
 const DuplicatesView = lazy(() => import('./views/DuplicatesView').then((m) => ({ default: m.DuplicatesView })));
 const SourcesView = lazy(() => import('./views/SourcesView').then((m) => ({ default: m.SourcesView })));
+const IntroduceView = lazy(() => import('./views/IntroViews').then((m) => ({ default: m.IntroduceView })));
+const IntroAcceptView = lazy(() => import('./views/IntroViews').then((m) => ({ default: m.IntroAcceptView })));
 const NetCheckView = lazy(() => import('./views/NetCheckView').then((m) => ({ default: m.NetCheckView })));
 
 function buildAppTitle(firstName: string | undefined, lastName: string | undefined): string {
@@ -47,7 +49,7 @@ const NAV: Array<{ id: NavId; label: string; segments: string[] }> = [
 
 function navOf(route: string[]): NavId {
   if (route[0] === 'karte') return 'karte';
-  if (route[0] === 'aktuelles') return 'aktuelles';
+  if (route[0] === 'aktuelles' || route[0] === 'vorstellung') return 'aktuelles';
   if (route[0] === 'mehr') return 'mehr';
   return 'kontakte';
 }
@@ -59,6 +61,7 @@ function renderView(route: string[]): React.ReactNode {
       return <ContactsView />;
     case 'kontakt':
       if (!second) return <ContactsView />;
+      if (third === 'vorstellen') return <IntroduceView key={second} connectionId={second} />;
       return third === 'freigabe' ? (
         <ShareView key={second} connectionId={second} />
       ) : (
@@ -69,6 +72,8 @@ function renderView(route: string[]): React.ReactNode {
       return <ConnectView key={second ?? 'neu'} code={second} />;
     case 'aktuelles':
       return <NewsView />;
+    case 'vorstellung':
+      return second ? <IntroAcceptView key={second} fingerprint={second} /> : <NewsView />;
     case 'karte':
       return <MyCardView />;
     case 'mehr':
@@ -170,7 +175,8 @@ function AppContent() {
   }
 
   const current = navOf(route);
-  const unseen = current === 'aktuelles' ? 0 : countUnseen(appState.activity, seenAt);
+  const openIntros = Object.values(appState.introsIn ?? {}).filter((intro) => intro.status === 'pending').length;
+  const unseen = (current === 'aktuelles' ? 0 : countUnseen(appState.activity, seenAt)) + openIntros;
 
   return (
     <div className="shell">
@@ -195,7 +201,7 @@ function AppContent() {
             {item.id === 'aktuelles' && unseen > 0 && (
               <span className="badge">
                 {unseen}
-                <span className="visually-hidden"> neue Änderungen</span>
+                <span className="visually-hidden"> neue Einträge</span>
               </span>
             )}
           </a>
