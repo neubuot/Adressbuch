@@ -228,6 +228,11 @@ export interface Connection {
   records?: Record<string, SourceRecord>;
   /** Einträge, die mit diesem Kontakt zusammengeführt wurden */
   merged?: MergedContact[];
+  /**
+   * Dieses Gerät bewahrt für den Kontakt einen Teil seines Tresorschlüssels
+   * auf (Wiederherstellung über Vertraute). Hier steht nur der Vermerk.
+   */
+  custody?: { setId: string; version: string };
   private?: Partial<ContactPrivate>;
   tagIds?: string[];
 }
@@ -274,6 +279,28 @@ export interface IntroIn {
   fields?: string[];
 }
 
+/** Ein Vertrauter in meiner Einrichtung zur Wiederherstellung */
+export interface TrustMember {
+  /** Der Teil des Tresorschlüssels für diesen Kontakt */
+  share: string;
+  /** Stand des Tresors, den der Kontakt zuletzt bestätigt hat */
+  depositedAt?: string;
+}
+
+/**
+ * Wiederherstellung über Vertraute: Der Tresorschlüssel ist in Teile zerlegt,
+ * `threshold` Vertraute zusammen können das Adressbuch zurückgeben.
+ */
+export interface TrustSetup {
+  /** Wechselt bei jeder Änderung an Schlüssel oder Vertrauten */
+  setId: string;
+  threshold: number;
+  /** Tresorschlüssel (base64), nötig, um den Tresor aktuell zu halten */
+  key: string;
+  createdAt: string;
+  members: Record<string, TrustMember>;
+}
+
 /** Wie lange eine unbeantwortete oder nicht zustande gekommene Vorstellung bestehen bleibt */
 export const INTRO_MAX_AGE_DAYS = 30;
 
@@ -292,6 +319,10 @@ export interface AppState {
   introsOut?: Record<string, IntroOut>;
   /** Vorstellungen, die ich erhalten habe (Schlüssel: Kennung der Person) */
   introsIn?: Record<string, IntroIn>;
+  /** Wiederherstellung über Vertraute (ab Schema 2.2) */
+  trust?: TrustSetup;
+  /** Frühere Vertraute, die ihren Teil noch löschen sollen */
+  trustDropped?: string[];
 }
 
 // --- Nachrichten zwischen zwei Geräten ---
@@ -347,7 +378,49 @@ export interface IntroAckMessage {
   id: string;
 }
 
+/** "Welchen Stand meines Tresors bewahrst du auf?" */
+export interface VaultCheckMessage {
+  type: 'VAULT_CHECK';
+  setId: string;
+}
+
+export interface VaultStateMessage {
+  type: 'VAULT_STATE';
+  setId: string | null;
+  version: string | null;
+}
+
+/** Ein Stück des Tresors samt Teil des Schlüssels (zum Aufbewahren oder bei der Wiederherstellung) */
+export interface VaultPutMessage {
+  type: 'VAULT_PUT' | 'RECOVER_PUT';
+  setId: string;
+  threshold: number;
+  share: string;
+  version: string;
+  seq: number;
+  total: number;
+  data: string;
+  /** Bei der Wiederherstellung: Name der helfenden Person */
+  from?: string;
+}
+
+export interface VaultAckMessage {
+  type: 'VAULT_ACK' | 'RECOVER_ACK';
+  setId: string;
+  version: string;
+}
+
+/** "Lösche, was du für mich aufbewahrst" und die Bestätigung dazu */
+export interface VaultDropMessage {
+  type: 'VAULT_DROP' | 'VAULT_DROPPED';
+}
+
 export type P2PMessage =
+  | VaultCheckMessage
+  | VaultStateMessage
+  | VaultPutMessage
+  | VaultAckMessage
+  | VaultDropMessage
   | IntroMessage
   | IntroAckMessage
   | HelloMessage

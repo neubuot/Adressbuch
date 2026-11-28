@@ -47,6 +47,19 @@ export const MoreView: React.FC = () => {
           </a>
         </li>
         <li>
+          <a className="row" href={href('mehr', 'vertraute')}>
+            <span className="row-main">
+              <span className="row-title">Wiederherstellung über Vertraute</span>
+              <span className="row-sub">
+                {appState.trust
+                  ? `${Object.keys(appState.trust.members).length} Vertraute, ${appState.trust.threshold} müssen helfen`
+                  : 'Nicht eingerichtet'}
+              </span>
+            </span>
+            <span className="row-arrow" aria-hidden="true" />
+          </a>
+        </li>
+        <li>
           <a className="row" href={href('mehr', 'import')}>
             <span className="row-main">
               <span className="row-title">Vorhandene Kontakte übernehmen</span>

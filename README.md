@@ -109,6 +109,28 @@ Die Datei ist mit deinem Passwort verschlüsselt. **Ohne das Passwort lässt sie
 schon ein Adressbuch …" tippen, Datei auswählen, Passwort eingeben. Deine Kontakte verbinden
 sich danach von selbst wieder. Nutze eine Sicherung immer nur auf einem Gerät zur selben Zeit.
 
+### Wiederherstellung über Vertraute
+
+Zusätzlich zur Sicherungsdatei kannst du Menschen, denen du vertraust, zu deiner Absicherung
+machen: **Mehr → Wiederherstellung über Vertraute**. Du wählst zwei bis sieben verbundene
+Kontakte und legst fest, wie viele davon helfen müssen (zum Beispiel 2 von 3).
+
+- Dein Adressbuch wird verschlüsselt in einen Tresor gelegt. Der Schlüssel wird in Teile
+  zerlegt. Jede und jeder Vertraute bewahrt einen Teil und eine Kopie des Tresors auf.
+- Ein Teil allein öffnet nichts. So viele Vertraute, wie du festgelegt hast, könnten dein
+  Adressbuch aber gemeinsam lesen. Wähle sie entsprechend aus.
+- Der Tresor wird höchstens einmal am Tag erneuert, wenn du mit der Person verbunden bist.
+  Wiederhergestellt wird der Stand, der zuletzt hinterlegt wurde.
+
+**Gerät verloren?** Öffne die App auf dem neuen Gerät und wähle beim ersten Start
+**Ich habe Vertraute festgelegt …**. Die App zeigt einen Code. Ruf deine Vertrauten an und
+nenne ihn. Sie öffnen deinen Kontakt, wählen **Bei der Wiederherstellung helfen** und geben
+den Code ein. Sind genug Teile da, stellst du dein Adressbuch mit einem Tipp wieder her.
+Deine Kontakte verbinden sich danach von selbst wieder mit dir.
+
+**Du bist Vertrauensperson?** Gib deinen Teil nur weiter, wenn du sicher bist, dass wirklich
+die richtige Person danach fragt. Ruf an oder sprich persönlich.
+
 ### Vorhandene Kontakte übernehmen
 
 Unter **Mehr → Vorhandene Kontakte übernehmen** kannst du Kontakte aus dem Telefonbuch
@@ -430,6 +452,12 @@ danach bleiben (`keep`). Beide Seiten setzen die Frist selbst um.
 Vorgestellten zugestimmt, treffen sie sich in dem Raum, der sich aus ihren beiden Kennungen
 ergibt, und weisen sich wie üblich per Signatur aus.
 
+Für die Wiederherstellung über Vertraute fragt `VAULT_CHECK` nach dem aufbewahrten Stand
+(`VAULT_STATE`), `VAULT_PUT` überträgt den Tresor in Stücken samt einem Teil des Schlüssels
+(`VAULT_ACK`), `VAULT_DROP` bittet um Löschung (`VAULT_DROPPED`). Bei einer Wiederherstellung
+verbinden sich das neue Gerät und ein Vertrauter über einen Code. Dabei entsteht kein
+Kontakt, es wird nur der Teil übergeben (`RECOVER_PUT`, `RECOVER_ACK`).
+
 ---
 
 ## Sicherheit und Grenzen
@@ -440,6 +468,12 @@ ergibt, und weisen sich wie üblich per Signatur aus.
   Ausnahme ist eine Vorstellung durch einen gemeinsamen Kontakt, der beide zugestimmt haben.
   Wie verlässlich der dabei genannte Name ist, hängt vom Vertrauen in den Vorstellenden ab.
 - Empfangene Daten werden auf bekannte Textfelder begrenzt.
+- **Wiederherstellung über Vertraute:** Der Schlüssel des Tresors wird nach Shamir geteilt,
+  der Tresor ist mit AES-256-GCM verschlüsselt. Die festgelegte Zahl an Vertrauten kann ihn
+  gemeinsam öffnen, auch ohne dein Zutun. Wer sich gegenüber genügend Vertrauten erfolgreich
+  als du ausgibt, erhält dein Adressbuch samt Geräteschlüssel. Der Schutz hängt deshalb daran,
+  dass Vertraute vor dem Helfen wirklich nachfragen. Teil und Tresor liegen bei ihnen
+  unverschlüsselt in der Datenbank des Browsers.
 - **Beide müssen gleichzeitig online sein.** Es gibt keinen Zwischenspeicher; Änderungen
   werden beim nächsten gemeinsamen Online-Sein nachgeholt.
 - **Ein Gerät pro Adressbuch.** Dasselbe Adressbuch auf mehreren eigenen Geräten zu führen,

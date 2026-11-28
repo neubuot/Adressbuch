@@ -19,6 +19,7 @@ import {
 } from '../utils/crypto';
 import { store } from '../store/automerge-store';
 import type { SignalData } from 'simple-peer';
+import { getCustody, putRecovery, type VaultPiece } from '../trust/custody';
 
 export interface P2PManagerConfig {
   signalingUrl: string;
@@ -28,7 +29,14 @@ export interface P2PManagerConfig {
 export type LinkEvent =
   | { type: 'linked'; connectionId: string; isNew: boolean; viaInvite: boolean; viaIntro?: boolean }
   | { type: 'incompatible'; connectionId: string }
-  | { type: 'failed'; duringInvite: boolean };
+  | { type: 'failed'; duringInvite: boolean }
+  /**
+   * Wiederherstellung über Vertraute: `connected` die Gegenseite ist da,
+   * `sent` der Teil ist unterwegs, `delivered` er ist angekommen,
+   * `received` dieses Gerät hat einen Teil erhalten, `missing` es gibt
+   * nichts zu übergeben.
+   */
+  | { type: 'recovery'; phase: 'connected' | 'sent' | 'delivered' | 'received' | 'missing' };
 
 interface Link {
   sessionId: string;
@@ -38,6 +46,10 @@ interface Link {
   connectionId?: string;
   connectTimer: number | null;
 }
+
+type RecoveryContext =
+  | { roomCode: string; role: 'seeker' }
+  | { roomCode: string; role: 'helper'; ownerId: string; served: boolean };
 
 interface InviteContext {
   roomCode: string;
@@ -63,6 +75,7 @@ export class P2PManager implements SyncHost {
   private rejoinAttempts: Map<string, number> = new Map();
   private rejoinTimers: Map<string, number> = new Map();
   private invite: InviteContext | null = null;
+  private recovery: RecoveryContext | null = null;
   private linkListeners: Array<(event: LinkEvent) => void> = [];
   private statusListeners: Array<(status: SignalingStatus) => void> = [];
   private unsubscribeStore: (() => void) | null = null;
@@ -124,6 +137,8 @@ export class P2PManager implements SyncHost {
       });
 
       signaling.start();
+      // Wurde schon vor dem Start eine Wiederherstellung begonnen, jetzt den Raum betreten
+      if (this.recovery) signaling.joinRoom(this.recovery.roomCode);
 
       // Karte oder Freigabe geändert? Dann von selbst übertragen.
       this.unsubscribeStore = store.onChange(() => this.scheduleSync());
@@ -209,6 +224,78 @@ export class P2PManager implements SyncHost {
     if (!this.invite) return;
     this.signalingClient?.leaveRoom(this.invite.roomCode);
     this.invite = null;
+  }
+
+  // --- Wiederherstellung über Vertraute ---
+
+  /**
+   * Beginnt die eigene Wiederherstellung: Unter dem Code können Vertraute
+   * ihren Teil übergeben. Ein früher verwendeter Code kann weitergenutzt werden.
+   */
+  startRecovery(code?: string): string {
+    const roomCode = code ? normalizeConnectionCode(code) : generateConnectionCode();
+    if (this.recovery?.role === 'seeker' && this.recovery.roomCode === roomCode) return roomCode;
+    this.endRecovery();
+    this.recovery = { roomCode, role: 'seeker' };
+    this.signalingClient?.joinRoom(roomCode);
+    return roomCode;
+  }
+
+  /** Hilft einem Kontakt bei der Wiederherstellung: Unter dem Code wird dessen Teil übergeben */
+  helpRecovery(code: string, ownerId: string): void {
+    this.endRecovery();
+    const roomCode = normalizeConnectionCode(code);
+    this.recovery = { roomCode, role: 'helper', ownerId, served: false };
+    this.signalingClient?.joinRoom(roomCode);
+  }
+
+  endRecovery(): void {
+    if (!this.recovery) return;
+    const roomCode = this.recovery.roomCode;
+    this.recovery = null;
+    for (const link of Array.from(this.links.values())) {
+      if (link.roomCode === roomCode && !link.connectionId) this.teardown(link.sessionId, false);
+    }
+    this.signalingClient?.leaveRoom(roomCode);
+  }
+
+  async onRecoveryLinked(sessionId: string): Promise<void> {
+    const recovery = this.recovery;
+    const link = this.links.get(sessionId);
+    if (!recovery || !link) return;
+    if (recovery.role === 'seeker') {
+      this.emit({ type: 'recovery', phase: 'connected' });
+      return;
+    }
+    // Den Teil nur einmal und nur an eine Gegenstelle übergeben
+    if (recovery.served) return;
+    const custody = await getCustody(recovery.ownerId);
+    if (!custody) {
+      this.emit({ type: 'recovery', phase: 'missing' });
+      return;
+    }
+    recovery.served = true;
+    const card = store.getDoc().myCard;
+    const from = [card.firstName, card.lastName].map((part) => (part || '').trim()).filter(Boolean).join(' ');
+    link.controller.sendRecoveryPiece(custody, from);
+    this.emit({ type: 'recovery', phase: 'sent' });
+  }
+
+  async onRecoveryPiece(_sessionId: string, piece: VaultPiece, from: string): Promise<boolean> {
+    if (this.recovery?.role !== 'seeker') return false;
+    await putRecovery(piece, from);
+    this.emit({ type: 'recovery', phase: 'received' });
+    return true;
+  }
+
+  onRecoveryDelivered(sessionId: string): void {
+    if (this.recovery?.role !== 'helper') return;
+    this.emit({ type: 'recovery', phase: 'delivered' });
+    // Kurz warten, damit nichts abgeschnitten wird, dann die Verbindung beenden
+    window.setTimeout(() => {
+      this.teardown(sessionId, false);
+      this.endRecovery();
+    }, 500);
   }
 
   // --- Verbindungsaufbau ---
@@ -344,6 +431,7 @@ export class P2PManager implements SyncHost {
       if (this.destroyed || !this.signalingClient) return;
       const stillWanted =
         this.invite?.roomCode === roomCode ||
+        this.recovery?.roomCode === roomCode ||
         Array.from(this.persistentRooms.entries()).some(
           ([connectionId, code]) =>
             code === roomCode && (!!store.getDoc().connections[connectionId] || this.isAcceptedIntro(connectionId))
@@ -359,6 +447,10 @@ export class P2PManager implements SyncHost {
 
   async resolveContact(sessionId: string, connectionId: string, pubKey: string): Promise<ContactDecision> {
     if (connectionId === this.localFingerprint) return 'reject'; // eigenes zweites Fenster
+
+    // Verbindung über den Code einer Wiederherstellung: kein Kontakt, nur die Übergabe
+    const recoveryLink = this.links.get(sessionId);
+    if (this.recovery && recoveryLink && recoveryLink.roomCode === this.recovery.roomCode) return 'recovery';
 
     const existing = store.getDoc().connections[connectionId];
     if (existing && existing.kind !== 'local') return 'known';
@@ -523,6 +615,7 @@ export class P2PManager implements SyncHost {
     this.sessionRooms.clear();
     this.introSessions.clear();
     this.invite = null;
+    this.recovery = null;
 
     if (this.signalingClient) {
       this.signalingClient.disconnect();
