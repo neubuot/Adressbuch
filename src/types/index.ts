@@ -8,7 +8,7 @@
  * wird nichts übertragen, damit kein Gerät Daten des anderen beschädigt.
  */
 export const SCHEMA_VERSION = '2.1.0';
-export const APP_VERSION = '0.4.1';
+export const APP_VERSION = '0.4.2';
 
 export function schemaMajor(version: string | undefined): number {
   const major = parseInt((version || '1').split('.')[0], 10);

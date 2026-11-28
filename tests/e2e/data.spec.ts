@@ -438,6 +438,8 @@ test('Doppelte Einträge zusammenführen und wieder trennen; Import zurücknehme
 
   await load('a.vcf', ['BEGIN:VCARD', 'VERSION:3.0', 'N:Sommer;Clara;;;', 'ADR;TYPE=HOME:;;Seeweg 3;Konstanz;;78462;DE', 'END:VCARD', '']);
   await page.getByRole('button', { name: 'Kontakt übernehmen' }).click();
+  // Erst weiter, wenn die App nach dem Übernehmen zur Kontaktliste gewechselt ist
+  await expect(page.getByText('1 Kontakt', { exact: true })).toBeVisible();
   // Gleicher Name und Ort: unsicherer Treffer, bewusst ohne Haken als eigener Eintrag übernehmen
   await load('b.vcf', ['BEGIN:VCARD', 'VERSION:3.0', 'N:Sommer;Clara;;;', 'TEL;TYPE=CELL:0160 7654321', 'ADR;TYPE=HOME:;;;Konstanz;;;', 'END:VCARD', '']);
   await expect(page.getByText('bitte prüfen')).toBeVisible();
@@ -459,6 +461,8 @@ test('Doppelte Einträge zusammenführen und wieder trennen; Import zurücknehme
 
   // Wieder trennen
   await page.getByRole('button', { name: 'Wieder trennen' }).click();
+  // Erst neu laden, wenn die Trennung gespeichert ist (der Knopf verschwindet danach)
+  await expect(page.getByRole('button', { name: 'Wieder trennen' })).toBeHidden();
   await page.goto('/');
   await expect(page.getByText('2 Kontakte', { exact: true })).toBeVisible();
   await page.goto('/#/mehr/doppelt');
@@ -470,6 +474,8 @@ test('Doppelte Einträge zusammenführen und wieder trennen; Import zurücknehme
   await page.getByRole('listitem').filter({ hasText: 'b.vcf' }).getByRole('button', { name: 'Zurücknehmen' }).click();
   await expect(page.getByRole('dialog')).toContainText('1 Eintrag');
   await page.getByRole('button', { name: 'Import zurücknehmen' }).click();
+  // Erst neu laden, wenn die Änderung gespeichert und der Dialog geschlossen ist
+  await expect(page.getByRole('dialog')).toBeHidden();
   await page.goto('/');
   await expect(page.getByText('1 Kontakt', { exact: true })).toBeVisible();
 

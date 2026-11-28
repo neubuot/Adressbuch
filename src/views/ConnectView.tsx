@@ -31,7 +31,7 @@ type Step = 'share' | 'link' | 'done';
 const SLOW_AFTER_MS = 20000;
 
 /** Liest den Einladungscode aus einem gescannten oder eingefügten Text */
-export function extractCode(text: string): string {
+function extractCode(text: string): string {
   const trimmed = text.trim();
   const fromLink = trimmed.match(/verbinden\/([A-Za-z0-9-]{8,9})/);
   if (fromLink) return normalizeConnectionCode(fromLink[1]);

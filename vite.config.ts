@@ -44,6 +44,28 @@ function serviceWorkerPrecache(): Plugin {
   };
 }
 
+/**
+ * Automerge bringt seine WASM-Datei in mehreren Fassungen mit. Der Bundler
+ * legt eine davon ab, obwohl kein Skript sie lädt. Solche Dateien werden
+ * hier wieder entfernt, damit sie weder ausgeliefert noch vorgehalten werden.
+ */
+function dropUnusedWasm(): Plugin {
+  return {
+    name: 'adressbuch-drop-unused-wasm',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      const code = Object.values(bundle)
+        .map((item) => (item.type === 'chunk' ? item.code : ''))
+        .join(' ');
+      for (const [name, item] of Object.entries(bundle)) {
+        if (item.type !== 'asset' || !name.endsWith('.wasm')) continue;
+        const base = name.split('/').pop() as string;
+        if (!code.includes(base)) delete bundle[name];
+      }
+    },
+  };
+}
+
 /** Kurzkennung des Quelltext-Stands für die Versionsanzeige; '' ohne Git */
 function buildCommit(): string {
   try {
@@ -57,6 +79,7 @@ export default defineConfig({
   plugins: [
     react(),
     wasm(),
+    dropUnusedWasm(),
     serviceWorkerPrecache(),
   ],
   // Relative Pfade, damit die App auch in einem Unterordner läuft
@@ -71,7 +94,8 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     target: 'esnext',
-    sourcemap: true,
+    // Source-Maps nur auf Wunsch (SOURCEMAP=1), sie gehören nicht auf den Server
+    sourcemap: process.env.SOURCEMAP === '1',
   },
   test: {
     globals: true,
