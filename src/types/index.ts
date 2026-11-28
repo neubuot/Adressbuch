@@ -7,8 +7,8 @@
  * zwei Geräte Daten austauschen dürfen: Bei unterschiedlicher Hauptversion
  * wird nichts übertragen, damit kein Gerät Daten des anderen beschädigt.
  */
-export const SCHEMA_VERSION = '2.1.0';
-export const APP_VERSION = '0.4.2';
+export const SCHEMA_VERSION = '2.2.0';
+export const APP_VERSION = '0.5.0';
 
 export function schemaMajor(version: string | undefined): number {
   const major = parseInt((version || '1').split('.')[0], 10);
@@ -208,6 +208,15 @@ export interface Connection {
   knownName?: string;
   peerPubKey: string;
   allowedFields: string[];
+  /**
+   * Ende einer befristeten Freigabe (ISO-Zeitpunkt). Danach gilt `fieldsAfter`
+   * statt `allowedFields` (ab Schema 2.2).
+   */
+  shareUntil?: string;
+  fieldsAfter?: string[];
+  /** Befristung der empfangenen Karte, wie sie die Gegenseite mitgeteilt hat */
+  remoteUntil?: string;
+  remoteKeep?: string[];
   storeRemoteCard: boolean;
   createdAt?: string;
   lastSyncAt?: string;
@@ -278,6 +287,9 @@ export interface PatchMessage {
   type: 'PATCH';
   schemaVersion?: string;
   fields: Record<string, unknown>;
+  /** Befristete Freigabe: Ab diesem Zeitpunkt gelten nur noch die Felder in `keep` */
+  until?: string;
+  keep?: string[];
 }
 
 export interface AckMessage {

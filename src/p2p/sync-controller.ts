@@ -15,7 +15,7 @@
 
 import type { PeerConnection } from './peer-connection';
 import { store } from '../store/automerge-store';
-import { projectFields } from '../utils/policy';
+import { activeLimit, effectiveFields, projectFields, sanitizeLimit, shareState } from '../utils/policy';
 import { stableHash } from '../utils/hash';
 import { createFingerprint, createNonce, signText, verifyText } from '../utils/crypto';
 import { APP_VERSION, SCHEMA_VERSION, isSchemaCompatible, type P2PMessage } from '../types';
@@ -94,7 +94,7 @@ export class SyncController {
         await this.handleStateHash(message.hash);
         break;
       case 'PATCH':
-        await this.handlePatch(message.schemaVersion, message.fields);
+        await this.handlePatch(message.schemaVersion, message.fields, message.until, message.keep);
         break;
       case 'ACK':
         await this.handleAck();
@@ -175,7 +175,8 @@ export class SyncController {
   private sendStateHash(): void {
     const connection = this.getConnection();
     if (!connection) return;
-    const hash = connection.remoteCard ? stableHash(connection.remoteCard) : NO_CARD_YET;
+    const limit = sanitizeLimit(connection.remoteUntil, connection.remoteKeep);
+    const hash = connection.remoteCard ? stableHash(shareState(connection.remoteCard, limit)) : NO_CARD_YET;
     this.peerConnection.send({ type: 'STATE_HASH', hash });
   }
 
@@ -184,8 +185,7 @@ export class SyncController {
     const connection = this.getConnection();
     if (!connection) return;
 
-    const projection = projectFields(store.getDoc().myCard, connection.allowedFields);
-    const localHash = stableHash(projection);
+    const localHash = this.localHash(connection);
     if (remoteHash !== localHash) {
       this.sendPatch();
     } else {
@@ -199,19 +199,31 @@ export class SyncController {
     const connection = this.getConnection();
     if (!this.ready || !connection) return;
 
-    const fields = projectFields(store.getDoc().myCard, connection.allowedFields);
-    this.lastSentHash = stableHash(fields);
-    this.peerConnection.send({ type: 'PATCH', schemaVersion: SCHEMA_VERSION, fields });
+    const fields = projectFields(store.getDoc().myCard, effectiveFields(connection));
+    const limit = activeLimit(connection);
+    this.lastSentHash = stableHash(shareState(fields, limit));
+    this.peerConnection.send({
+      type: 'PATCH',
+      schemaVersion: SCHEMA_VERSION,
+      fields,
+      ...(limit ? { until: limit.until, keep: limit.keep } : {}),
+    });
   }
 
-  private async handlePatch(schemaVersion: unknown, fields: unknown): Promise<void> {
+  /** Vergleichswert für das, was dieser Kontakt gerade von mir sehen darf */
+  private localHash(connection: NonNullable<ReturnType<SyncController['getConnection']>>): string {
+    const fields = projectFields(store.getDoc().myCard, effectiveFields(connection));
+    return stableHash(shareState(fields, activeLimit(connection)));
+  }
+
+  private async handlePatch(schemaVersion: unknown, fields: unknown, until?: unknown, keep?: unknown): Promise<void> {
     if (!this.ready || !this.connectionId) return;
     if (!isSchemaCompatible(typeof schemaVersion === 'string' ? schemaVersion : undefined)) return;
     const connection = this.getConnection();
     if (!connection) return;
 
     if (connection.storeRemoteCard) {
-      await store.applyRemoteCard(this.connectionId, fields);
+      await store.applyRemoteCard(this.connectionId, fields, sanitizeLimit(until, keep));
     }
     this.peerConnection.send({ type: 'ACK' });
   }
@@ -228,7 +240,7 @@ export class SyncController {
   syncIfChanged(): void {
     const connection = this.getConnection();
     if (!this.ready || !connection) return;
-    const hash = stableHash(projectFields(store.getDoc().myCard, connection.allowedFields));
+    const hash = this.localHash(connection);
     if (hash !== this.lastSentHash) {
       this.sendPatch();
     }

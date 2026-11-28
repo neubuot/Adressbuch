@@ -74,6 +74,13 @@ Mit **Freigabe ändern** passt du das an, mit **Freigabe widerrufen** nimmst du 
 Ehrlich gesagt: Was jemand bereits gesehen, abgeschrieben oder ins eigene Telefonbuch
 übernommen hat, lässt sich nicht zurückholen. Ein Widerruf wirkt für die Zukunft.
 
+**Freigabe auf Zeit:** Unter **Freigabe ändern** legst du bei **Wie lange?** fest, dass die
+Freigabe nach einem Tag, einer Woche, einem Monat oder an einem bestimmten Datum endet, zum
+Beispiel für Handwerker oder eine Reisegruppe. Danach sieht die Person nur noch deinen Namen
+oder gar nichts mehr. Ihre App entfernt die Angaben nach Ablauf von selbst, auch wenn ihr
+gerade nicht verbunden seid. Voraussetzung ist, dass auch sie die App ab Version 0.5.0 nutzt;
+mit einer älteren Version verschwinden die Angaben erst beim nächsten Abgleich mit dir.
+
 ### 5. Daten sichern
 
 **Dein Adressbuch liegt nur auf deinem Gerät.** Geht das Gerät verloren oder löschst du die
@@ -403,6 +410,8 @@ bestätigt sind, stehen in `AppState.notDuplicates`.
 5. `ACK` – Bestätigung
 
 Übertragen werden ausschließlich die für diesen Kontakt freigegebenen, ausgefüllten Felder.
+Ist die Freigabe befristet, nennt `PATCH` zusätzlich das Ende (`until`) und die Felder, die
+danach bleiben (`keep`). Beide Seiten setzen die Frist selbst um.
 
 ---
 

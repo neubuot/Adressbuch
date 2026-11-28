@@ -42,6 +42,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     let cancelled = false;
     let unsubscribeStatus: (() => void) | null = null;
+    let expiryTimer: number | null = null;
 
     const unsubscribeStore = store.onChange((doc) => setAppState(doc));
 
@@ -53,6 +54,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setIsLoaded(true);
 
       if (store.getBlock()) return;
+
+      // Befristete Freigaben: beim Start und danach regelmäßig auf Ablauf prüfen
+      await store.expireShares();
+      expiryTimer = window.setInterval(() => void store.expireShares(), 30000);
 
       // Den Browser bitten, die Daten nicht von sich aus zu löschen
       void navigator.storage?.persist?.().catch(() => undefined);
@@ -70,6 +75,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return () => {
       cancelled = true;
+      if (expiryTimer !== null) clearInterval(expiryTimer);
       unsubscribeStore();
       unsubscribeStatus?.();
       getP2PManager()?.destroy();

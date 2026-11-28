@@ -20,7 +20,7 @@ import {
 } from '../model/contact';
 import { describeShare, PRIVATE_FIELDS, getFieldLabel } from '../model/fields';
 import { describeChange } from '../model/activity';
-import { projectFields } from '../utils/policy';
+import { activeLimit, effectiveFields, projectFields, sanitizeLimit } from '../utils/policy';
 import { mailHref, mapHref, phoneHref, saveToAddressBook } from '../model/actions';
 import { ADDRESS_CARD_FIELDS, type AddressCardField, type ContactPrivate, type ContactPrivateField, type RemoteCard } from '../types';
 import { mergeRecords } from '../model/merge';
@@ -67,7 +67,10 @@ export const ContactView: React.FC<{ connectionId: string }> = ({ connectionId }
   const isLocal = connection.kind === 'local';
   const card = connection.remoteCard;
   const hasCard = !!card && Object.keys(card).length > 0;
-  const shared = projectFields(appState.myCard, connection.allowedFields);
+  const sharedFields = effectiveFields(connection);
+  const shared = projectFields(appState.myCard, sharedFields);
+  const limit = activeLimit(connection);
+  const remoteLimit = sanitizeLimit(connection.remoteUntil, connection.remoteKeep);
   const tags = Object.values(appState.tags ?? {}).sort((a, b) => a.name.localeCompare(b.name, 'de'));
 
   // Weitere E-Mail-Adressen und Nummern aus den Quellen, die nicht in die Karte passen
@@ -140,7 +143,7 @@ export const ContactView: React.FC<{ connectionId: string }> = ({ connectionId }
 
   const revoke = async () => {
     setDialog(null);
-    await store.updateConnection(connectionId, { allowedFields: [] });
+    await store.setShare(connectionId, []);
     notify(`Freigabe widerrufen. ${name} erhält ab jetzt nichts mehr von dir.`);
   };
 
@@ -148,7 +151,7 @@ export const ContactView: React.FC<{ connectionId: string }> = ({ connectionId }
     setDialog(null);
     if (!isLocal && connection.status === 'online' && connection.allowedFields.length > 0) {
       // Solange die Verbindung noch steht: Angaben beim Kontakt zurückziehen
-      await store.updateConnection(connectionId, { allowedFields: [] });
+      await store.setShare(connectionId, []);
       await new Promise((resolve) => setTimeout(resolve, 600));
     }
     await store.removeConnection(connectionId);
@@ -247,7 +250,17 @@ export const ContactView: React.FC<{ connectionId: string }> = ({ connectionId }
 
       <Section title="Angaben">
         {hasCard ? (
-          <CardFacts card={card} />
+          <>
+            <CardFacts card={card} />
+            {!isLocal && remoteLimit && (
+              <p className="small muted" style={{ marginTop: 'var(--s-3)' }} data-testid="remote-limit">
+                {name} gibt dir diese Angaben bis zum {formatDate(remoteLimit.until)} frei.{' '}
+                {remoteLimit.keep.length > 0
+                  ? 'Danach bleibt hier nur noch der Name stehen.'
+                  : 'Danach verschwinden sie hier von selbst.'}
+              </p>
+            )}
+          </>
         ) : (
           <p className="muted">
             {isLocal
@@ -322,14 +335,20 @@ export const ContactView: React.FC<{ connectionId: string }> = ({ connectionId }
 
       {!isLocal && (
         <Section title={`Was ${name} von mir sieht`}>
-          <p className="strong">{describeShare(connection.allowedFields)}</p>
+          <p className="strong">{describeShare(sharedFields)}</p>
+          {limit && (
+            <p className="small" data-testid="share-limit">
+              Befristet bis zum {formatDate(limit.until)}. Danach:{' '}
+              {limit.keep.length > 0 ? 'nur noch dein Name' : 'nichts mehr'}.
+            </p>
+          )}
           {Object.keys(shared).length > 0 ? (
             <div style={{ marginTop: 'var(--s-3)' }}>
               <CardFacts card={shared} plain />
             </div>
           ) : (
             <p className="muted small">
-              {connection.allowedFields.length === 0
+              {sharedFields.length === 0
                 ? `${name} sieht nichts von dir.`
                 : 'Die freigegebenen Angaben sind auf deiner Karte noch leer.'}
             </p>
@@ -490,7 +509,7 @@ export const ContactView: React.FC<{ connectionId: string }> = ({ connectionId }
 
       <Section title={isLocal ? 'Eintrag' : 'Verbindung'}>
         <div className="actions">
-          {!isLocal && connection.allowedFields.length > 0 && (
+          {!isLocal && sharedFields.length > 0 && (
             <button type="button" className="btn" onClick={() => setDialog('revoke')}>
               Freigabe widerrufen
             </button>

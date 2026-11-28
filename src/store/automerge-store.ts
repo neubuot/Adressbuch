@@ -26,7 +26,8 @@ import {
 import { manualOverrides, mergeRecords } from '../model/merge';
 import type { IncomingContact } from '../model/dedupe';
 import { createUuid, isFromNewerApp, migrateState, needsMigration } from './migrate';
-import { sanitizeRemoteCard } from '../utils/policy';
+import { isExpired, keepFields, sanitizeRemoteCard, type ShareLimit } from '../utils/policy';
+import { isCardField } from '../model/fields';
 import { displayNameOfCard } from '../model/contact';
 
 /** Wie viele Einträge die Änderungsübersicht höchstens behält */
@@ -699,11 +700,16 @@ export class AutomergeStore {
    * gegenüber dem bisherigen Stand geändert hat.
    * Gibt die Anzahl der geänderten Felder zurück.
    */
-  async applyRemoteCard(id: string, received: unknown): Promise<number> {
+  async applyRemoteCard(id: string, received: unknown, limit: ShareLimit | null = null): Promise<number> {
     const existing = this.doc.connections[id];
     if (!existing) return 0;
 
-    const card = sanitizeRemoteCard(received);
+    let card = sanitizeRemoteCard(received);
+    // Eine Befristung, die schon abgelaufen ist, gilt sofort
+    if (limit && isExpired(limit.until)) {
+      card = keepFields(card, limit.keep);
+      limit = null;
+    }
     const previous: RemoteCard = existing.remoteCard ? plain(existing.remoteCard) : {};
     const isFirst = !existing.remoteCard;
     const now = new Date().toISOString();
@@ -726,6 +732,13 @@ export class AutomergeStore {
         connection.remoteCard = card;
       }
       connection.lastSyncAt = now;
+      if (limit) {
+        if (connection.remoteUntil !== limit.until) connection.remoteUntil = limit.until;
+        if ((connection.remoteKeep ?? []).join(',') !== limit.keep.join(',')) connection.remoteKeep = [...limit.keep];
+      } else {
+        if (connection.remoteUntil !== undefined) delete connection.remoteUntil;
+        if (connection.remoteKeep !== undefined) delete connection.remoteKeep;
+      }
       const name = displayNameOfCard(card);
       if (name && connection.knownName !== name) connection.knownName = name;
 
@@ -738,6 +751,69 @@ export class AutomergeStore {
     });
 
     return entries.length;
+  }
+
+  /**
+   * Setzt die Freigabe für einen Kontakt. Mit `limit` gilt sie bis zu dem
+   * genannten Zeitpunkt; danach sieht der Kontakt nur noch `limit.keep`.
+   */
+  async setShare(id: string, fields: string[], limit: ShareLimit | null = null): Promise<void> {
+    const allowed = fields.filter(isCardField);
+    await this.updateConnection(id, {
+      allowedFields: allowed,
+      shareUntil: limit ? limit.until : undefined,
+      fieldsAfter: limit ? limit.keep.filter((field) => (allowed as string[]).includes(field)) : undefined,
+    });
+  }
+
+  /**
+   * Setzt abgelaufene Befristungen um, in beide Richtungen:
+   * - eigene Freigaben fallen auf die Freigabe für danach zurück,
+   * - empfangene Angaben, deren Frist um ist, werden hier entfernt.
+   * Ändert nichts, solange keine Frist abgelaufen ist. Gibt die Anzahl der
+   * betroffenen Kontakte zurück.
+   */
+  async expireShares(now: number = Date.now()): Promise<number> {
+    const due = Object.values(this.doc.connections).filter(
+      (connection) => isExpired(connection.shareUntil, now) || isExpired(connection.remoteUntil, now)
+    );
+    if (due.length === 0) return 0;
+    const ids = due.map((connection) => connection.id);
+    const at = new Date(now).toISOString();
+
+    await this.change('Befristete Freigaben abgelaufen', (doc) => {
+      for (const id of ids) {
+        const connection = doc.connections[id];
+        if (!connection) continue;
+
+        if (isExpired(connection.shareUntil, now)) {
+          const after = (connection.fieldsAfter ?? []).filter(isCardField);
+          connection.allowedFields = [...after];
+          delete connection.shareUntil;
+          delete connection.fieldsAfter;
+        }
+
+        if (isExpired(connection.remoteUntil, now)) {
+          const previous: RemoteCard = connection.remoteCard ? plain(connection.remoteCard) : {};
+          const kept = keepFields(previous, [...(connection.remoteKeep ?? [])]);
+          for (const field of ADDRESS_CARD_FIELDS) {
+            const oldValue = previous[field] ?? '';
+            if (oldValue && !kept[field]) {
+              if (!doc.activity) doc.activity = [];
+              doc.activity.push({ id: createUuid(), connectionId: id, at, field, oldValue, newValue: '' });
+            }
+          }
+          if (connection.remoteCard) connection.remoteCard = kept;
+          delete connection.remoteUntil;
+          delete connection.remoteKeep;
+        }
+      }
+      if (doc.activity) {
+        const overflow = doc.activity.length - MAX_ACTIVITY_ENTRIES;
+        if (overflow > 0) doc.activity.splice(0, overflow);
+      }
+    });
+    return ids.length;
   }
 
   /**

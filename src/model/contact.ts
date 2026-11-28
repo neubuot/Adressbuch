@@ -199,3 +199,11 @@ export function longNoContact(
   }
   return result.sort((a, b) => b.months - a.months);
 }
+
+/** Ende des genannten Tages (Ortszeit) als ISO-Zeitpunkt; '' bei ungültigem Datum */
+export function endOfDayIso(day: string): string {
+  const match = day.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return '';
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59);
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
